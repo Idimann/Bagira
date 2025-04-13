@@ -1,14 +1,17 @@
 const std = @import("std");
+const tp = @import("types.zig");
 
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
-    try stdout.print("Hello joe\n", .{});
 
-    const x: u64 = 0b10000;
-    const foo: i32 = @intCast(@ctz(x));
-    try stdout.print("{}\n", .{foo});
+    var b = tp.BitBoard .new();
+    _ = b.set(tp.Square.new(tp.Rank.Rank4, tp.File.FileE));
+    try b.print(stdout);
+    _ = b.mirror_h();
+    try stdout.print("----------------", .{});
+    try b.print(stdout);
 
     try bw.flush();
 }
