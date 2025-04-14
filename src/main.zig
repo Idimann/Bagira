@@ -10,7 +10,7 @@ pub fn main() !void {
     _ = b.set(tp.Square.new(tp.Rank.Rank4, tp.File.FileE));
     try b.print(stdout);
     _ = b.mirror_h();
-    try stdout.print("----------------", .{});
+    try stdout.print("----------------\n", .{});
     try b.print(stdout);
 
     try bw.flush();

@@ -146,10 +146,12 @@ pub const BitBoard = packed struct {
     }
 
     pub fn print(b: *const BitBoard, wr: anytype) !void {
+        try wr.print("  a b c d e f g h\n", .{});
         for (0..8) |in| {
             for (0..8) |j| {
                 const i = 7 - in;
 
+                if(j == 0) try wr.print("{} ", .{i + 1});
                 if (b.check(Square.new(@enumFromInt(i), @enumFromInt(j))))
                     try wr.print("x", .{})
                 else
