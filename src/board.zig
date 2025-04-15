@@ -1,6 +1,24 @@
 const std = @import("std");
 const tp = @import("types.zig");
 
+pub const Mirror = packed struct {
+    white: bool,
+    horiz: bool,
+};
+pub const Castling = packed struct {
+    ok: bool,
+    oq: bool,
+    tk: bool,
+    tq: bool,
+
+    pub inline fn mirror(self: *Castling) *Castling {
+        const us: u4 = @bitCast(self.*);
+        self.* = @bitCast((us & 0b0011) << 2 | (us & 0b1100) >> 2);
+
+        return self;
+    }
+};
+
 pub const Board = struct {
     o_pieces: tp.BitBoard,
     t_pieces: tp.BitBoard,
@@ -10,11 +28,12 @@ pub const Board = struct {
     o_king: tp.Square,
     t_king: tp.Square,
 
-    white: bool,
-    mirrored_h: bool,
+    castle: Castling,
+    mir: Mirror,
 
     pub fn mirror(self: *Board) *Board {
-        self.white = !self.white;
+        self.mir.white = !self.mir.white;
+        _ = self.castle.mirror();
 
         _ = self.o_pieces.mirror();
         _ = self.t_pieces.mirror();
@@ -28,7 +47,7 @@ pub const Board = struct {
     }
 
     pub fn mirror_h(self: *Board) *Board {
-        self.mirrored_h = !self.mirrored_h;
+        self.mir.horiz = !self.mir.horiz;
 
         _ = self.o_pieces.mirror_h();
         _ = self.t_pieces.mirror_h();
@@ -61,7 +80,7 @@ pub const Board = struct {
         if (b.o_king == s or b.t_king == s)
             return .{ .our = col, .typ = .King };
 
-        return null;
+        return .{ .our = col, .typ = .Knight };
     }
 
     const FenStage = enum { Start, Who, Castling, EnPassant };
@@ -76,54 +95,110 @@ pub const Board = struct {
             .o_king = .a1,
             .t_king = .a1,
 
-            .white = true,
-            .mirrored_h = false,
+            .castle = .{ .ok = false, .oq = false, .tk = false, .tq = false },
+            .mir = .{ .white = true, .horiz = false },
         };
 
+        var first_space = false;
+        var en_passant_char: u8 = 0;
         var pos = tp.Square.a8;
         for (fen) |c| {
             switch (stage) {
                 .Start => {
                     switch (c) {
                         '/' => {
-                            if (pos.file() == .FileH)
-                                pos = @enumFromInt(@intFromEnum(pos) - 15)
-                            else
+                            if (pos.file() == .FileH) {
+                                pos = @enumFromInt(@intFromEnum(pos) - 15);
+                            } else {
                                 return error.InvalidNewlineSlash;
+                            }
                         },
                         '1'...'8' => {
-                            pos = @enumFromInt(@intFromEnum(pos) + @as(u8, c - '0'));
+                            pos = @enumFromInt(@intFromEnum(pos) + @as(u8, c - '1'));
+
+                            if (pos == .h1) {
+                                first_space = false;
+                                stage = .Who;
+                            }
                         },
                         else => {
                             _ = switch (c) {
-                                'P' | 'p' => ret.pawns.set(pos),
-                                'B' | 'b' => ret.diags.set(pos),
-                                'R' | 'r' => ret.lines.set(pos),
-                                'Q' | 'q' => {
+                                'P', 'p' => ret.pawns.set(pos),
+                                'B', 'b' => ret.diags.set(pos),
+                                'R', 'r' => ret.lines.set(pos),
+                                'Q', 'q' => {
                                     _ = ret.diags.set(pos);
                                     _ = ret.lines.set(pos);
                                 },
-                                'N' | 'n' => {},
+                                'N', 'n' => {},
                                 'K' => ret.o_king = pos,
                                 'k' => ret.t_king = pos,
                                 else => return error.InvalidPiece,
                             };
                             _ = switch (c) {
-                                'P' | 'N' | 'B' | 'R' | 'Q' | 'K' => ret.o_pieces.set(pos),
-                                'p' | 'n' | 'b' | 'r' | 'q' | 'k' => ret.t_pieces.set(pos),
+                                'P', 'N', 'B', 'R', 'Q', 'K' => ret.o_pieces.set(pos),
+                                'p', 'n', 'b', 'r', 'q', 'k' => ret.t_pieces.set(pos),
                                 else => return error.InvalidPiece,
                             };
 
-                            pos = @enumFromInt(@intFromEnum(pos) + 1);
+                            if (pos == .h1) {
+                                first_space = false;
+                                stage = .Who;
+                            }
+
+                            if (pos.file() != .FileH)
+                                pos = @enumFromInt(@intFromEnum(pos) + 1);
                         },
                     }
-
-                    if (pos == .a8)
-                        stage = .Who;
                 },
-                .Who => return error.TODO,
-                .Castling => return error.TODO,
-                .EnPassant => return error.TODO,
+                .Who => {
+                    switch (c) {
+                        'w' => {},
+                        'b' => _ = ret.mirror().mirror_h(),
+                        ' ' => {
+                            if (first_space) {
+                                first_space = false;
+                                stage = .Castling;
+                            } else first_space = true;
+                        },
+                        else => return error.InvalidSide,
+                    }
+                },
+                .Castling => {
+                    switch (c) {
+                        '-' => continue,
+                        'K' => ret.castle.ok = true,
+                        'Q' => ret.castle.oq = true,
+                        'k' => ret.castle.tk = true,
+                        'q' => ret.castle.tq = true,
+                        ' ' => stage = .EnPassant,
+                        else => return error.InvalidCastle,
+                    }
+                },
+                .EnPassant => {
+                    if (en_passant_char == 0) {
+                        en_passant_char = c;
+                        if (en_passant_char == '-') break else continue;
+                    }
+
+                    switch (c) {
+                        ' ' => break,
+                        '1'...'8' => {
+                            if ('a' > en_passant_char or en_passant_char > 'h')
+                                return error.InvalidEnPassant;
+                            const file: tp.File = @enumFromInt(en_passant_char - 'a');
+                            const rank: tp.Rank = @enumFromInt(c - '1');
+                            var sq = tp.Square.new(rank, file);
+                            if (!ret.mir.white)
+                                _ = sq.mirror().mirror_h();
+
+                            _ = ret.pawns.set(sq);
+
+                            break;
+                        },
+                        else => return error.InvalidEnPassant,
+                    }
+                },
             }
         }
 
@@ -148,15 +223,14 @@ pub const Board = struct {
                             .Queen => "Q",
                             .King => "K",
                         }
-                    else
-                        switch (che.typ) {
-                            .Pawn => "p",
-                            .Knight => "n",
-                            .Bishop => "b",
-                            .Rook => "r",
-                            .Queen => "q",
-                            .King => "k",
-                        };
+                    else switch (che.typ) {
+                        .Pawn => "p",
+                        .Knight => "n",
+                        .Bishop => "b",
+                        .Rook => "r",
+                        .Queen => "q",
+                        .King => "k",
+                    };
 
                     try wr.print("{s}", .{pi});
                 } else try wr.print(" ", .{});

@@ -106,7 +106,7 @@ pub const PieceType = enum(u6) { Pawn, Knight, Bishop, Rook, Queen, King };
 pub const BitBoard = packed struct {
     v: u64,
 
-    pub fn new() BitBoard {
+    pub inline fn new() BitBoard {
         return .{ .v = 0 };
     }
 
