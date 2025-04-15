@@ -89,6 +89,16 @@ pub const Square = enum(u6) {
     pub fn to_board(self: Square) BitBoard {
         return .{ .v = @as(u64, 0b1) << @intFromEnum(self) };
     }
+
+    pub fn mirror(self: *Square) *Square {
+        self.* = @enumFromInt(@intFromEnum(self.*) ^ 0b111000);
+        return self;
+    }
+
+    pub fn mirror_h(self: *Square) *Square {
+        self.* = @enumFromInt(@intFromEnum(self.*) ^ 0b000111);
+        return self;
+    }
 };
 
 pub const PieceType = enum(u6) { Pawn, Knight, Bishop, Rook, Queen, King };
