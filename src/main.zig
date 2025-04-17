@@ -8,8 +8,11 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
 
-    const b = try bo.Board.from_fen(pos.start);
+    var b = try bo.Board.from_fen(pos.Testing.castling);
+    const undo = b.apply(.{ .from = .e1, .to = .c1, .typ = .CastleQueenside });
+    try stdout.print("{?}\n", .{undo});
     try b.print(stdout);
+    try b.en_passant().print(stdout);
 
     try bw.flush();
 }

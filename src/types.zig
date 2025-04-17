@@ -1,6 +1,6 @@
 const std = @import("std");
 
-pub const Direction = enum(u6) {
+pub const Direction = enum(i6) {
     North = 8,
     South = -8,
     East = 1,
@@ -9,6 +9,7 @@ pub const Direction = enum(u6) {
     NorthWest = 7,
     SouthEast = -7,
     SouthWest = -9,
+    NorthNorth = 16,
 };
 
 pub const Rank = enum(u6) {
@@ -82,8 +83,12 @@ pub const Square = enum(u6) {
     }
 
     pub fn apply(self: *Square, dir: Direction) *Square {
-        self.* = @enumFromInt(@intFromEnum(self) + @intFromEnum(dir));
+        self.* = @enumFromInt(@as(i7, @intFromEnum(self)) + @intFromEnum(dir));
         return self;
+    }
+
+    pub inline fn get_apply(self: Square, dir: Direction) Square {
+        return @enumFromInt(@as(i7, @intFromEnum(self)) + @intFromEnum(dir));
     }
 
     pub fn to_board(self: Square) BitBoard {
@@ -120,7 +125,7 @@ pub const BitBoard = packed struct {
     }
 
     pub inline fn unset(self: *BitBoard, s: Square) *BitBoard {
-        self.v = self.v | ~s.to_board().v;
+        self.v = self.v & ~s.to_board().v;
         return self;
     }
 
@@ -155,13 +160,41 @@ pub const BitBoard = packed struct {
         return self;
     }
 
+    pub const CheckType = enum {
+        Nothing,
+        Moved,
+        Removed,
+    };
+    pub inline fn move(self: *BitBoard, fr: Square, to: Square) CheckType {
+        if (self.check(fr)) {
+            _ = self.unset(fr).set(to);
+            return .Moved;
+        }
+
+        if (self.check(to)) {
+            _ = self.unset(to);
+            return .Removed;
+        }
+
+        return .Nothing;
+    }
+
+    pub inline fn check_unset(self: *BitBoard, sq: Square) CheckType {
+        if (self.check(sq)) {
+            _ = self.unset(sq);
+            return .Removed;
+        }
+
+        return .Nothing;
+    }
+
     pub fn print(b: *const BitBoard, wr: anytype) !void {
         try wr.print("  a b c d e f g h\n", .{});
         for (0..8) |in| {
             for (0..8) |j| {
                 const i = 7 - in;
 
-                if(j == 0) try wr.print("{} ", .{i + 1});
+                if (j == 0) try wr.print("{} ", .{i + 1});
                 if (b.check(Square.new(@enumFromInt(i), @enumFromInt(j))))
                     try wr.print("x", .{})
                 else
@@ -170,4 +203,41 @@ pub const BitBoard = packed struct {
             }
         }
     }
+};
+
+pub const Castling = packed struct {
+    ok: bool,
+    oq: bool,
+    tk: bool,
+    tq: bool,
+
+    pub inline fn mirror(self: *Castling) *Castling {
+        const us: u4 = @bitCast(self.*);
+        self.* = @bitCast((us & 0b0011) << 2 | (us & 0b1100) >> 2);
+
+        return self;
+    }
+};
+
+pub const MoveType = enum(u3) {
+    Normal,
+    EnPassant,
+    CastleKingside,
+    CastleQueenside,
+    PromKnight,
+    PromBishop,
+    PromRook,
+    PromQueen,
+};
+pub const Move = packed struct {
+    from: Square,
+    to: Square,
+    typ: MoveType,
+};
+
+
+pub const Remove = packed struct {
+    typ: ?PieceType,
+    pas: ?Square,
+    cas: Castling,
 };
