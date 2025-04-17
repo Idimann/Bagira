@@ -37,16 +37,16 @@ pub const Board = struct {
         return self;
     }
 
-    pub fn mirror_h(self: *Board) *Board {
+    pub fn mirrorH(self: *Board) *Board {
         self.mir.horiz = !self.mir.horiz;
 
-        _ = self.o_pieces.mirror_h();
-        _ = self.t_pieces.mirror_h();
-        _ = self.pawns.mirror_h();
-        _ = self.diags.mirror_h();
-        _ = self.lines.mirror_h();
-        _ = self.o_king.mirror_h();
-        _ = self.t_king.mirror_h();
+        _ = self.o_pieces.mirrorH();
+        _ = self.t_pieces.mirrorH();
+        _ = self.pawns.mirrorH();
+        _ = self.diags.mirrorH();
+        _ = self.lines.mirrorH();
+        _ = self.o_king.mirrorH();
+        _ = self.t_king.mirrorH();
 
         return self;
     }
@@ -74,12 +74,12 @@ pub const Board = struct {
         return .{ .our = col, .typ = .Knight };
     }
 
-    pub inline fn en_passant(self: *const Board) tp.BitBoard {
+    pub inline fn enPassant(self: *const Board) tp.BitBoard {
         return .{ .v = self.pawns.v & ~(self.o_pieces.v | self.t_pieces.v) };
     }
 
     const FenStage = enum { Start, Who, Castling, EnPassant };
-    pub fn from_fen(fen: []const u8) !Board {
+    pub fn fromFen(fen: []const u8) !Board {
         var stage = FenStage.Start;
         var ret = Board{
             .o_pieces = tp.BitBoard.new(),
@@ -97,6 +97,7 @@ pub const Board = struct {
         var first_space = false;
         var en_passant_char: u8 = 0;
         var pos = tp.Square.a8;
+        var contin = false;
         for (fen) |c| {
             switch (stage) {
                 .Start => {
@@ -115,8 +116,6 @@ pub const Board = struct {
                                 add
                             else
                                 @enumFromInt(@intFromEnum(add) + 1);
-
-                            if (pos == .h1) continue;
                         },
                         else => {
                             _ = switch (c) {
@@ -149,14 +148,18 @@ pub const Board = struct {
                     }
 
                     if (pos == .h1) {
-                        first_space = false;
-                        stage = .Who;
+                        if (contin) {
+                            first_space = false;
+                            stage = .Who;
+                        } else {
+                            contin = true;
+                        }
                     }
                 },
                 .Who => {
                     switch (c) {
                         'w' => {},
-                        'b' => _ = ret.mirror().mirror_h(),
+                        'b' => _ = ret.mirror().mirrorH(),
                         ' ' => {
                             if (first_space) {
                                 first_space = false;
@@ -192,7 +195,7 @@ pub const Board = struct {
                             const rank: tp.Rank = @enumFromInt(c - '1');
                             var sq = tp.Square.new(rank, file);
                             if (!ret.mir.white)
-                                _ = sq.mirror().mirror_h();
+                                _ = sq.mirror().mirrorH();
 
                             _ = ret.pawns.set(sq);
 
@@ -208,19 +211,21 @@ pub const Board = struct {
     }
 
     pub fn apply(self: *Board, m: tp.Move) tp.Remove {
-        const pas = self.en_passant().lsb();
+        const pas = self.enPassant().lsb();
+        const cas = self.castle;
+
         self.pawns.v &= self.o_pieces.v | self.t_pieces.v; //Unsetting en passant
 
         var ret: ?tp.PieceType = null;
         switch (m.typ) {
             .Normal => {
                 _ = self.o_pieces.move(m.from, m.to);
-                const th = self.t_pieces.check_unset(m.to);
+                const th = self.t_pieces.checkUnset(m.to);
                 const pa = self.pawns.move(m.from, m.to);
                 const di = self.diags.move(m.from, m.to);
                 const li = self.lines.move(m.from, m.to);
-                if (pa == .Moved and m.to == m.from.get_apply(.NorthNorth)) {
-                    _ = self.pawns.set(m.from.get_apply(.North));
+                if (pa == .Moved and m.to == m.from.getApply(.NorthNorth)) {
+                    _ = self.pawns.set(m.from.getApply(.North));
                 } else if (li == .Moved and di != .Moved) {
                     if (m.from == .a1) {
                         if (self.mir.horiz)
@@ -254,10 +259,9 @@ pub const Board = struct {
             .EnPassant => {
                 _ = self.o_pieces.move(m.from, m.to);
 
-                const hit = m.to.get_apply(.South);
+                const hit = m.to.getApply(.South);
                 _ = self.t_pieces.unset(hit);
                 _ = self.pawns.unset(hit).move(m.from, m.to);
-                ret = .Pawn;
             },
             .CastleKingside => {
                 _ = self.o_pieces.move(m.from, m.to);
@@ -284,9 +288,9 @@ pub const Board = struct {
                 self.castle.oq = false;
             },
             .PromKnight => {
-                const th = self.t_pieces.check_unset(m.to);
-                const di = self.diags.check_unset(m.to);
-                const li = self.lines.check_unset(m.to);
+                const th = self.t_pieces.checkUnset(m.to);
+                const di = self.diags.checkUnset(m.to);
+                const li = self.lines.checkUnset(m.to);
                 _ = self.o_pieces.move(m.from, m.to);
                 _ = self.pawns.unset(m.from);
                 if (th == .Removed) {
@@ -300,9 +304,9 @@ pub const Board = struct {
                 }
             },
             .PromBishop => {
-                const th = self.t_pieces.check_unset(m.to);
-                const di = self.diags.check_unset(m.to);
-                const li = self.lines.check_unset(m.to);
+                const th = self.t_pieces.checkUnset(m.to);
+                const di = self.diags.checkUnset(m.to);
+                const li = self.lines.checkUnset(m.to);
                 _ = self.o_pieces.move(m.from, m.to);
                 _ = self.pawns.unset(m.from);
                 _ = self.diags.set(m.to);
@@ -317,9 +321,9 @@ pub const Board = struct {
                 }
             },
             .PromRook => {
-                const th = self.t_pieces.check_unset(m.to);
-                const di = self.diags.check_unset(m.to);
-                const li = self.lines.check_unset(m.to);
+                const th = self.t_pieces.checkUnset(m.to);
+                const di = self.diags.checkUnset(m.to);
+                const li = self.lines.checkUnset(m.to);
                 _ = self.o_pieces.move(m.from, m.to);
                 _ = self.pawns.unset(m.from);
                 _ = self.lines.set(m.to);
@@ -334,9 +338,9 @@ pub const Board = struct {
                 }
             },
             .PromQueen => {
-                const th = self.t_pieces.check_unset(m.to);
-                const di = self.diags.check_unset(m.to);
-                const li = self.lines.check_unset(m.to);
+                const th = self.t_pieces.checkUnset(m.to);
+                const di = self.diags.checkUnset(m.to);
+                const li = self.lines.checkUnset(m.to);
                 _ = self.o_pieces.move(m.from, m.to);
                 _ = self.pawns.unset(m.from);
                 _ = self.diags.set(m.to);
@@ -354,26 +358,88 @@ pub const Board = struct {
         }
 
         _ = self.mirror();
-        return .{ .typ = ret, .pas = pas };
+        return .{ .typ = ret, .pas = pas, .cas = cas };
     }
 
-    pub fn remove(self: *Board, m: tp.Move, u: tp.Remove) void {
+    pub fn remove(self: *Board, m: tp.Move, u: tp.Remove) !void {
+        _ = self.mirror();
+        self.pawns.v &= self.o_pieces.v | self.t_pieces.v; //Unsetting old en passant
+
         switch (m.typ) {
             .Normal => {
                 _ = self.o_pieces.move(m.to, m.from);
                 _ = self.pawns.move(m.to, m.from);
                 _ = self.diags.move(m.to, m.from);
-                if (self.lines.move(m.to, m.from) == .Moved) {
-                    self.castle = u.cas;
-                } else if (self.o_king == m.to) {
+                _= self.lines.move(m.to, m.from);
+                if (self.o_king == m.to) {
                     self.o_king = m.from;
-                    self.castle = u.cas;
                 }
+            },
+            .EnPassant => {
+                _ = self.o_pieces.move(m.to, m.from);
+
+                const hit = m.to.getApply(.South);
+                _ = self.t_pieces.set(hit);
+                _ = self.pawns.set(hit).move(m.to, m.from);
+            },
+            .CastleKingside => {
+                _ = self.o_pieces.move(m.to, m.from);
+                self.o_king = m.from;
+
+                const fr: tp.Square = if (self.mir.horiz) .a1 else .h1;
+                const to: tp.Square = if (self.mir.horiz) .c1 else .f1;
+                _ = self.o_pieces.move(to, fr);
+                _ = self.lines.move(to, fr);
+            },
+            .CastleQueenside => {
+                _ = self.o_pieces.move(m.to, m.from);
+                self.o_king = m.from;
+
+                const fr: tp.Square = if (self.mir.horiz) .h1 else .a1;
+                const to: tp.Square = if (self.mir.horiz) .e1 else .d1;
+                _ = self.o_pieces.move(to, fr);
+                _ = self.lines.move(to, fr);
+            },
+            .PromKnight => {
+                _ = self.o_pieces.move(m.to, m.from);
+                _ = self.pawns.set(m.from);
+            },
+            .PromBishop => {
+                _ = self.o_pieces.move(m.to, m.from);
+                _ = self.pawns.set(m.from);
+                _ = self.diags.unset(m.to);
+            },
+            .PromRook => {
+                _ = self.o_pieces.move(m.to, m.from);
+                _ = self.pawns.set(m.from);
+                _ = self.lines.unset(m.to);
+            },
+            .PromQueen => {
+                _ = self.o_pieces.move(m.to, m.from);
+                _ = self.pawns.set(m.from);
+                _ = self.diags.unset(m.to);
+                _ = self.lines.unset(m.to);
             },
         }
 
+        if (u.typ) |typ| {
+            _ = self.t_pieces.set(m.to);
+            switch(typ) {
+                .Pawn => _ = self.pawns.set(m.to),
+                .Knight => {},
+                .Bishop => _ = self.diags.set(m.to),
+                .Rook => _ = self.lines.set(m.to),
+                .Queen => {
+                    _ = self.diags.set(m.to);
+                    _ = self.lines.set(m.to);
+                },
+                else => return error.InvalidRemoveTyp,
+            }
+        }
+
+        self.castle = u.cas;
         if (u.pas) |pas| {
-            self.pawns.v |= pas.to_board(); //Resetting en passant
+            self.pawns.v |= pas.toBoard().v; //Resetting en passant
         }
     }
 

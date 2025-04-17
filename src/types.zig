@@ -62,7 +62,7 @@ pub const Square = enum(u6) {
         return @intFromEnum(self.rank()) + @intFromEnum(self.file());
     }
 
-    pub inline fn anti_diagonal(self: Square) u6 {
+    pub inline fn antiDiagonal(self: Square) u6 {
         return @intFromEnum(self.rank()) + 7 - @intFromEnum(self.file());
     }
 
@@ -87,11 +87,11 @@ pub const Square = enum(u6) {
         return self;
     }
 
-    pub inline fn get_apply(self: Square, dir: Direction) Square {
+    pub inline fn getApply(self: Square, dir: Direction) Square {
         return @enumFromInt(@as(i7, @intFromEnum(self)) + @intFromEnum(dir));
     }
 
-    pub fn to_board(self: Square) BitBoard {
+    pub inline fn toBoard(self: Square) BitBoard {
         return .{ .v = @as(u64, 0b1) << @intFromEnum(self) };
     }
 
@@ -100,7 +100,7 @@ pub const Square = enum(u6) {
         return self;
     }
 
-    pub fn mirror_h(self: *Square) *Square {
+    pub fn mirrorH(self: *Square) *Square {
         self.* = @enumFromInt(@intFromEnum(self.*) ^ 0b000111);
         return self;
     }
@@ -116,16 +116,16 @@ pub const BitBoard = packed struct {
     }
 
     pub inline fn check(self: BitBoard, s: Square) bool {
-        return self.v & s.to_board().v != 0;
+        return self.v & s.toBoard().v != 0;
     }
 
     pub inline fn set(self: *BitBoard, s: Square) *BitBoard {
-        self.v = self.v | s.to_board().v;
+        self.v = self.v | s.toBoard().v;
         return self;
     }
 
     pub inline fn unset(self: *BitBoard, s: Square) *BitBoard {
-        self.v = self.v & ~s.to_board().v;
+        self.v = self.v & ~s.toBoard().v;
         return self;
     }
 
@@ -136,7 +136,7 @@ pub const BitBoard = packed struct {
         };
     }
 
-    pub fn pop_lsb(self: *BitBoard) ?Square {
+    pub fn popLsb(self: *BitBoard) ?Square {
         if (lsb(self.*)) |ret| {
             self.unset(ret);
             return ret;
@@ -153,7 +153,7 @@ pub const BitBoard = packed struct {
         return self;
     }
 
-    pub fn mirror_h(self: *BitBoard) *BitBoard {
+    pub fn mirrorH(self: *BitBoard) *BitBoard {
         self.v = (self.v & 0x0F0F0F0F0F0F0F0F) << 4 | (self.v & 0xF0F0F0F0F0F0F0F0) >> 4;
         self.v = (self.v & 0x3333333333333333) << 2 | (self.v & 0xCCCCCCCCCCCCCCCC) >> 2;
         self.v = (self.v & 0x5555555555555555) << 1 | (self.v & 0xAAAAAAAAAAAAAAAA) >> 1;
@@ -179,7 +179,7 @@ pub const BitBoard = packed struct {
         return .Nothing;
     }
 
-    pub inline fn check_unset(self: *BitBoard, sq: Square) CheckType {
+    pub inline fn checkUnset(self: *BitBoard, sq: Square) CheckType {
         if (self.check(sq)) {
             _ = self.unset(sq);
             return .Removed;
@@ -236,7 +236,7 @@ pub const Move = packed struct {
 };
 
 
-pub const Remove = packed struct {
+pub const Remove = struct {
     typ: ?PieceType,
     pas: ?Square,
     cas: Castling,
