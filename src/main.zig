@@ -2,11 +2,14 @@ const std = @import("std");
 const tp = @import("types.zig");
 const bo = @import("board.zig");
 const pos = @import("positions.zig");
+const tab = @import("tablegen.zig");
 
 pub fn main() !void {
     const stdout_file = std.io.getStdOut().writer();
     var bw = std.io.bufferedWriter(stdout_file);
     const stdout = bw.writer();
+
+    tab.initRooks();
 
     var b = try bo.Board.fromFen(pos.start);
 

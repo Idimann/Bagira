@@ -34,6 +34,32 @@ pub const File = enum(u6) {
     FileH,
 };
 
+pub inline fn rankMask(r: Rank) BitBoard {
+    return .{ .v = switch (r) {
+        .Rank1 => 0xFF,
+        .Rank2 => 0xFF00,
+        .Rank3 => 0xFF0000,
+        .Rank4 => 0xFF000000,
+        .Rank5 => 0xFF00000000,
+        .Rank6 => 0xFF0000000000,
+        .Rank7 => 0xFF000000000000,
+        .Rank8 => 0xFF00000000000000,
+    }};
+}
+
+pub inline fn fileMask(f: File) BitBoard {
+    return .{ .v = switch (f) {
+        .FileA => 0x0101010101010101,
+        .FileB => 0x0202020202020202,
+        .FileC => 0x0404040404040404,
+        .FileD => 0x0808080808080808,
+        .FileE => 0x1010101010101010,
+        .FileF => 0x2020202020202020,
+        .FileG => 0x4040404040404040,
+        .FileH => 0x8080808080808080,
+    }};
+}
+
 pub const Square = enum(u6) {
     // zig fmt: off
     a1, b1, c1, d1, e1, f1, g1, h1,
@@ -145,6 +171,10 @@ pub const BitBoard = packed struct {
         return null;
     }
 
+    pub inline fn popcount(self: BitBoard) usize {
+        return @as(usize, @popCount(self.v));
+    }
+
     //From lc0
     pub fn mirror(self: *BitBoard) *BitBoard {
         self.v = (self.v & 0x00000000FFFFFFFF) << 32 | (self.v & 0xFFFFFFFF00000000) >> 32;
@@ -186,6 +216,10 @@ pub const BitBoard = packed struct {
         }
 
         return .Nothing;
+    }
+
+    pub inline fn without(self: BitBoard, o: BitBoard) BitBoard {
+        return .{ .v = self.v & ~o.v };
     }
 
     pub fn print(b: *const BitBoard, wr: anytype) !void {
