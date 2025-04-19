@@ -226,6 +226,7 @@ const RookMagics = [64]tp.BitBoard{
 var RookShifts = std.mem.zeroes([64]usize);
 pub var RookAttacks = std.mem.zeroes([64][4096]tp.BitBoard);
 
+// https://analog-hors.github.io/site/magic-bitboards/
 pub fn initRooks() void {
     var sq = @as(usize, @intFromEnum(tp.Square.a1));
 
