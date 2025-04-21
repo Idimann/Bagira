@@ -1,4 +1,5 @@
 //Most of this is taken from Avalanche (Not the logic, just the numbers)
+// https://analog-hors.github.io/site/magic-bitboards/
 
 const std = @import("std");
 const tp = @import("types.zig");
@@ -205,49 +206,340 @@ pub const PawnAttacks = [64]tp.Bitboard{
     .{ .v = 0x0 },
 };
 
-const RookMagics = [64]tp.BitBoard{
-    0x0080001020400080, 0x0040001000200040, 0x0080081000200080, 0x0080040800100080,
-    0x0080020400080080, 0x0080010200040080, 0x0080008001000200, 0x0080002040800100,
-    0x0000800020400080, 0x0000400020005000, 0x0000801000200080, 0x0000800800100080,
-    0x0000800400080080, 0x0000800200040080, 0x0000800100020080, 0x0000800040800100,
-    0x0000208000400080, 0x0000404000201000, 0x0000808010002000, 0x0000808008001000,
-    0x0000808004000800, 0x0000808002000400, 0x0000010100020004, 0x0000020000408104,
-    0x0000208080004000, 0x0000200040005000, 0x0000100080200080, 0x0000080080100080,
-    0x0000040080080080, 0x0000020080040080, 0x0000010080800200, 0x0000800080004100,
-    0x0000204000800080, 0x0000200040401000, 0x0000100080802000, 0x0000080080801000,
-    0x0000040080800800, 0x0000020080800400, 0x0000020001010004, 0x0000800040800100,
-    0x0000204000808000, 0x0000200040008080, 0x0000100020008080, 0x0000080010008080,
-    0x0000040008008080, 0x0000020004008080, 0x0000010002008080, 0x0000004081020004,
-    0x0000204000800080, 0x0000200040008080, 0x0000100020008080, 0x0000080010008080,
-    0x0000040008008080, 0x0000020004008080, 0x0000800100020080, 0x0000800041000080,
-    0x00FFFCDDFCED714A, 0x007FFCDDFCED714A, 0x003FFFCDFFD88096, 0x0000040810002101,
-    0x0001000204080011, 0x0001000204000801, 0x0001000082000401, 0x0001FFFAABFAD1A2,
+const LineMagics = [64]tp.BitBoard{
+    .{ .v = 0x0080001020400080 },
+    .{ .v = 0x0040001000200040 },
+    .{ .v = 0x0080081000200080 },
+    .{ .v = 0x0080040800100080 },
+    .{ .v = 0x0080020400080080 },
+    .{ .v = 0x0080010200040080 },
+    .{ .v = 0x0080008001000200 },
+    .{ .v = 0x0080002040800100 },
+    .{ .v = 0x0000800020400080 },
+    .{ .v = 0x0000400020005000 },
+    .{ .v = 0x0000801000200080 },
+    .{ .v = 0x0000800800100080 },
+    .{ .v = 0x0000800400080080 },
+    .{ .v = 0x0000800200040080 },
+    .{ .v = 0x0000800100020080 },
+    .{ .v = 0x0000800040800100 },
+    .{ .v = 0x0000208000400080 },
+    .{ .v = 0x0000404000201000 },
+    .{ .v = 0x0000808010002000 },
+    .{ .v = 0x0000808008001000 },
+    .{ .v = 0x0000808004000800 },
+    .{ .v = 0x0000808002000400 },
+    .{ .v = 0x0000010100020004 },
+    .{ .v = 0x0000020000408104 },
+    .{ .v = 0x0000208080004000 },
+    .{ .v = 0x0000200040005000 },
+    .{ .v = 0x0000100080200080 },
+    .{ .v = 0x0000080080100080 },
+    .{ .v = 0x0000040080080080 },
+    .{ .v = 0x0000020080040080 },
+    .{ .v = 0x0000010080800200 },
+    .{ .v = 0x0000800080004100 },
+    .{ .v = 0x0000204000800080 },
+    .{ .v = 0x0000200040401000 },
+    .{ .v = 0x0000100080802000 },
+    .{ .v = 0x0000080080801000 },
+    .{ .v = 0x0000040080800800 },
+    .{ .v = 0x0000020080800400 },
+    .{ .v = 0x0000020001010004 },
+    .{ .v = 0x0000800040800100 },
+    .{ .v = 0x0000204000808000 },
+    .{ .v = 0x0000200040008080 },
+    .{ .v = 0x0000100020008080 },
+    .{ .v = 0x0000080010008080 },
+    .{ .v = 0x0000040008008080 },
+    .{ .v = 0x0000020004008080 },
+    .{ .v = 0x0000010002008080 },
+    .{ .v = 0x0000004081020004 },
+    .{ .v = 0x0000204000800080 },
+    .{ .v = 0x0000200040008080 },
+    .{ .v = 0x0000100020008080 },
+    .{ .v = 0x0000080010008080 },
+    .{ .v = 0x0000040008008080 },
+    .{ .v = 0x0000020004008080 },
+    .{ .v = 0x0000800100020080 },
+    .{ .v = 0x0000800041000080 },
+    .{ .v = 0x00FFFCDDFCED714A },
+    .{ .v = 0x007FFCDDFCED714A },
+    .{ .v = 0x003FFFCDFFD88096 },
+    .{ .v = 0x0000040810002101 },
+    .{ .v = 0x0001000204080011 },
+    .{ .v = 0x0001000204000801 },
+    .{ .v = 0x0001000082000401 },
+    .{ .v = 0x0001FFFAABFAD1A2 },
 };
-var RookShifts = std.mem.zeroes([64]usize);
-pub var RookAttacks = std.mem.zeroes([64][4096]tp.BitBoard);
+var LineShifts = std.mem.zeroes([64]usize);
+var LineMasks = std.mem.zeroes([64]tp.BitBoard);
+var LineAttacks = std.mem.zeroes([64][4096]tp.BitBoard);
 
-// https://analog-hors.github.io/site/magic-bitboards/
-pub fn initRooks() void {
-    var sq = @as(usize, @intFromEnum(tp.Square.a1));
+fn toFile(i: u64, f: tp.File) u64 {
+    var ret: u64 = 0;
 
-    const noRank = .{ .v = tp.fileMask(.FileA).v | tp.fileMask(.FileH).v };
-    const noFile = .{ .v = tp.rankMask(.Rank1).v | tp.rankMask(.Rank8).v };
-
-    while (sq <= @intFromEnum(tp.Square.h8)) : (sq += 1) {
-        const square: tp.Square = @enumFromInt(sq);
-        const mask = (tp.BitBoard { .v = tp.rankMask(square.rank()).without(noRank).v |
-            tp.fileMask(square.file()).without(noFile).v }).without(square.toBoard());
-
-        RookShifts[sq] = 64 - mask.popcount();
-
-        // var ran: u64 = 0;
-        // while (ran < 1<<6) : (ran += 1) {
-        //     var fil: u64 = 0;
-        //     while (fil < 1<<6) : (fil += 1) {
-        //         const pie =
-        //         (ran << (@intFromEnum(square.rank()) * 8 + 1))
-        //         | (fil << (@intFromEnum(square.file()) + 1));
-        //     }
-        // }
+    var iter = tp.FileMask[@intFromEnum(f)];
+    var count: u4 = 0;
+    while (iter.popLsb()) |sq| : (count += 1) {
+        if (i & (@as(u8, 1) << @intCast(count)) != 0) {
+            ret |= sq.toBoard().v;
+        }
     }
+
+    return ret;
+}
+
+fn getLineAttacks(sq: tp.Square, block: tp.BitBoard) tp.BitBoard {
+    var ret: tp.BitBoard = .{ .v = 0 };
+    const rank = @intFromEnum(sq.rank());
+    const file = @intFromEnum(sq.file());
+
+    for ((rank + 1)..8) |r| {
+        const s = tp.Square.new(@enumFromInt(r), sq.file());
+        _ = ret.set(s);
+        if (block.check(s))
+            break;
+    }
+    for (0..rank) |r| {
+        const s = tp.Square.new(@enumFromInt(rank - 1 - r), sq.file());
+        _ = ret.set(s);
+        if (block.check(s))
+            break;
+    }
+    for ((file + 1)..8) |f| {
+        const s = tp.Square.new(sq.rank(), @enumFromInt(f));
+        _ = ret.set(s);
+        if (block.check(s))
+            break;
+    }
+    for (0..file) |f| {
+        const s = tp.Square.new(sq.rank(), @enumFromInt(file - 1 - f));
+        _ = ret.set(s);
+        if (block.check(s))
+            break;
+    }
+
+    return ret;
+}
+
+pub fn initLines() void {
+    const noRank = .{ .v = tp.FileMask[@intFromEnum(tp.File.FileA)].v |
+        tp.FileMask[@intFromEnum(tp.File.FileH)].v };
+    const noFile = .{ .v = tp.RankMask[@intFromEnum(tp.Rank.Rank1)].v |
+        tp.RankMask[@intFromEnum(tp.Rank.Rank8)].v };
+
+    for (0..64) |sq| {
+        const square: tp.Square = @enumFromInt(sq);
+        const mask =
+            (tp.BitBoard{ .v = tp.RankMask[@intFromEnum(square.rank())].without(noRank).v |
+            tp.FileMask[@intFromEnum(square.file())].without(noFile).v })
+            .without(square.toBoard());
+
+        LineShifts[sq] = 64 - mask.popcount();
+        LineMasks[sq] = mask;
+
+        for (0..(1 << 6)) |ran| {
+            for (0..(1 << 6)) |fil| {
+                const rank = ran << 1;
+                const file = fil << 1;
+                const pie: tp.BitBoard = .{ .v = (rank << (@intFromEnum(square.rank()) * 8)) |
+                    toFile(file, square.file()) };
+
+                if (pie.v & square.toBoard().v != 0) continue;
+
+                const index = (pie.v *% LineMagics[sq].v) >> @intCast(LineShifts[sq]);
+                LineAttacks[sq][index] = getLineAttacks(square, pie);
+            }
+        }
+    }
+}
+
+pub inline fn getLineMask(s: tp.Square) tp.BitBoard {
+    return LineMasks[@intFromEnum(s)];
+}
+
+pub inline fn getLine(s: tp.Square, bl: tp.BitBoard) tp.BitBoard {
+    const shift = LineShifts[@intFromEnum(s)];
+    const magic = LineMagics[@intFromEnum(s)];
+    const index = (bl.v *% magic.v) >> @intCast(shift);
+    return LineAttacks[@intFromEnum(s)][index];
+}
+
+const DiagMagics = [64]tp.BitBoard{
+    .{ .v = 0x0002020202020200 },
+    .{ .v = 0x0002020202020000 },
+    .{ .v = 0x0004010202000000 },
+    .{ .v = 0x0004040080000000 },
+    .{ .v = 0x0001104000000000 },
+    .{ .v = 0x0000821040000000 },
+    .{ .v = 0x0000410410400000 },
+    .{ .v = 0x0000104104104000 },
+    .{ .v = 0x0000040404040400 },
+    .{ .v = 0x0000020202020200 },
+    .{ .v = 0x0000040102020000 },
+    .{ .v = 0x0000040400800000 },
+    .{ .v = 0x0000011040000000 },
+    .{ .v = 0x0000008210400000 },
+    .{ .v = 0x0000004104104000 },
+    .{ .v = 0x0000002082082000 },
+    .{ .v = 0x0004000808080800 },
+    .{ .v = 0x0002000404040400 },
+    .{ .v = 0x0001000202020200 },
+    .{ .v = 0x0000800802004000 },
+    .{ .v = 0x0000800400A00000 },
+    .{ .v = 0x0000200100884000 },
+    .{ .v = 0x0000400082082000 },
+    .{ .v = 0x0000200041041000 },
+    .{ .v = 0x0002080010101000 },
+    .{ .v = 0x0001040008080800 },
+    .{ .v = 0x0000208004010400 },
+    .{ .v = 0x0000404004010200 },
+    .{ .v = 0x0000840000802000 },
+    .{ .v = 0x0000404002011000 },
+    .{ .v = 0x0000808001041000 },
+    .{ .v = 0x0000404000820800 },
+    .{ .v = 0x0001041000202000 },
+    .{ .v = 0x0000820800101000 },
+    .{ .v = 0x0000104400080800 },
+    .{ .v = 0x0000020080080080 },
+    .{ .v = 0x0000404040040100 },
+    .{ .v = 0x0000808100020100 },
+    .{ .v = 0x0001010100020800 },
+    .{ .v = 0x0000808080010400 },
+    .{ .v = 0x0000820820004000 },
+    .{ .v = 0x0000410410002000 },
+    .{ .v = 0x0000082088001000 },
+    .{ .v = 0x0000002011000800 },
+    .{ .v = 0x0000080100400400 },
+    .{ .v = 0x0001010101000200 },
+    .{ .v = 0x0002020202000400 },
+    .{ .v = 0x0001010101000200 },
+    .{ .v = 0x0000410410400000 },
+    .{ .v = 0x0000208208200000 },
+    .{ .v = 0x0000002084100000 },
+    .{ .v = 0x0000000020880000 },
+    .{ .v = 0x0000001002020000 },
+    .{ .v = 0x0000040408020000 },
+    .{ .v = 0x0004040404040000 },
+    .{ .v = 0x0002020202020000 },
+    .{ .v = 0x0000104104104000 },
+    .{ .v = 0x0000002082082000 },
+    .{ .v = 0x0000000020841000 },
+    .{ .v = 0x0000000000208800 },
+    .{ .v = 0x0000000010020200 },
+    .{ .v = 0x0000000404080200 },
+    .{ .v = 0x0000040404040400 },
+    .{ .v = 0x0002020202020200 },
+};
+var DiagShifts = std.mem.zeroes([64]usize);
+var DiagMasks = std.mem.zeroes([64]tp.BitBoard);
+var DiagAttacks = std.mem.zeroes([64][4096]tp.BitBoard);
+
+fn toDiagonal(i: u64, d: u6) u64 {
+    var ret: u64 = 0;
+
+    var iter = tp.DiagonalMask[d];
+    var count: u4 = 0;
+    while (iter.popLsb()) |sq| : (count += 1) {
+        if (i & (@as(u8, 1) << @intCast(count)) != 0) {
+            ret |= sq.toBoard().v;
+        }
+    }
+
+    return ret;
+}
+
+fn toAntiDiagonal(i: u64, d: u6) u64 {
+    var ret: u64 = 0;
+
+    var iter = tp.AntiDiagonalMask[d];
+    var count: u4 = 0;
+    while (iter.popLsb()) |sq| : (count += 1) {
+        if (i & (@as(u8, 1) << @intCast(count)) != 0) {
+            ret |= sq.toBoard().v;
+        }
+    }
+
+    return ret;
+}
+
+fn getDiagAttacks(sq: tp.Square, block: tp.BitBoard) tp.BitBoard {
+    var ret: tp.BitBoard = .{ .v = 0 };
+    const rank = @intFromEnum(sq.rank());
+    const file = @intFromEnum(sq.file());
+
+    for (@max(rank + 1, file + 1)..8) |c| {
+        const val = c - @max(rank, file);
+        const s = tp.Square.new(@enumFromInt(rank + val), @enumFromInt(file + val));
+        _ = ret.set(s);
+        if (block.check(s))
+            break;
+    }
+    for (0..@min(rank, file)) |c| {
+        const val = c + 1;
+        const s = tp.Square.new(@enumFromInt(rank - val), @enumFromInt(file - val));
+        _ = ret.set(s);
+        if (block.check(s))
+            break;
+    }
+    for (@max(7 - rank, file + 1)..8) |c| {
+        const val = c - @max(7 - rank, file);
+        const s = tp.Square.new(@enumFromInt(rank - val), @enumFromInt(file + val));
+        _ = ret.set(s);
+        if (block.check(s))
+            break;
+    }
+    for (@max(rank + 1, 7 - file)..8) |c| {
+        const val = c - @max(rank, 7 - file);
+        const s = tp.Square.new(@enumFromInt(rank + val), @enumFromInt(file - val));
+        _ = ret.set(s);
+        if (block.check(s))
+            break;
+    }
+
+    return ret;
+}
+
+pub fn initDiags() void {
+    const no = .{ .v = tp.FileMask[@intFromEnum(tp.File.FileA)].v |
+        tp.FileMask[@intFromEnum(tp.File.FileH)].v |
+        tp.FileMask[@intFromEnum(tp.Rank.Rank1)].v |
+        tp.FileMask[@intFromEnum(tp.Rank.Rank8)].v };
+
+    for (0..64) |sq| {
+        const square: tp.Square = @enumFromInt(sq);
+        const mask =
+            (tp.BitBoard{ .v = tp.DiagonalMask[square.diagonal()].v |
+            tp.AntiDiagonalMask[square.antiDiagonal()].v })
+            .without(square.toBoard()).without(no);
+
+        DiagShifts[sq] = 64 - mask.popcount();
+        DiagMasks[sq] = mask;
+
+        for (0..(1 << 6)) |dia| {
+            for (0..(1 << 6)) |ant| {
+                const diag = dia << 1;
+                const anti = ant << 1;
+                const pie: tp.BitBoard = .{ .v = toDiagonal(diag, square.diagonal()) |
+                    toAntiDiagonal(anti, square.antiDiagonal()) };
+
+                if (pie.v & square.toBoard().v != 0) continue;
+
+                const index = (pie.v *% DiagMagics[sq].v) >> @intCast(DiagShifts[sq]);
+                DiagAttacks[sq][index] = getDiagAttacks(square, pie);
+            }
+        }
+    }
+}
+
+pub inline fn getDiagMask(s: tp.Square) tp.BitBoard {
+    return DiagMasks[@intFromEnum(s)];
+}
+
+pub inline fn getDiag(s: tp.Square, bl: tp.BitBoard) tp.BitBoard {
+    const shift = DiagShifts[@intFromEnum(s)];
+    const magic = DiagMagics[@intFromEnum(s)];
+    const index = (bl.v *% magic.v) >> @intCast(shift);
+    return DiagAttacks[@intFromEnum(s)][index];
 }

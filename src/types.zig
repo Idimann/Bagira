@@ -34,31 +34,63 @@ pub const File = enum(u6) {
     FileH,
 };
 
-pub inline fn rankMask(r: Rank) BitBoard {
-    return .{ .v = switch (r) {
-        .Rank1 => 0xFF,
-        .Rank2 => 0xFF00,
-        .Rank3 => 0xFF0000,
-        .Rank4 => 0xFF000000,
-        .Rank5 => 0xFF00000000,
-        .Rank6 => 0xFF0000000000,
-        .Rank7 => 0xFF000000000000,
-        .Rank8 => 0xFF00000000000000,
-    }};
-}
+pub const RankMask = [_]BitBoard{
+    .{ .v = 0xFF },
+    .{ .v = 0xFF00 },
+    .{ .v = 0xFF0000 },
+    .{ .v = 0xFF000000 },
+    .{ .v = 0xFF00000000 },
+    .{ .v = 0xFF0000000000 },
+    .{ .v = 0xFF000000000000 },
+    .{ .v = 0xFF00000000000000 },
+};
 
-pub inline fn fileMask(f: File) BitBoard {
-    return .{ .v = switch (f) {
-        .FileA => 0x0101010101010101,
-        .FileB => 0x0202020202020202,
-        .FileC => 0x0404040404040404,
-        .FileD => 0x0808080808080808,
-        .FileE => 0x1010101010101010,
-        .FileF => 0x2020202020202020,
-        .FileG => 0x4040404040404040,
-        .FileH => 0x8080808080808080,
-    }};
-}
+pub const FileMask = [_]BitBoard{
+    .{ .v = 0x0101010101010101 },
+    .{ .v = 0x0202020202020202 },
+    .{ .v = 0x0404040404040404 },
+    .{ .v = 0x0808080808080808 },
+    .{ .v = 0x1010101010101010 },
+    .{ .v = 0x2020202020202020 },
+    .{ .v = 0x4040404040404040 },
+    .{ .v = 0x8080808080808080 },
+};
+
+pub const DiagonalMask = [_]BitBoard{
+    .{ .v = 0x80 },
+    .{ .v = 0x8040 },
+    .{ .v = 0x804020 },
+    .{ .v = 0x80402010 },
+    .{ .v = 0x8040201008 },
+    .{ .v = 0x804020100804 },
+    .{ .v = 0x80402010080402 },
+    .{ .v = 0x8040201008040201 },
+    .{ .v = 0x4020100804020100 },
+    .{ .v = 0x2010080402010000 },
+    .{ .v = 0x1008040201000000 },
+    .{ .v = 0x804020100000000 },
+    .{ .v = 0x402010000000000 },
+    .{ .v = 0x201000000000000 },
+    .{ .v = 0x100000000000000 },
+};
+
+pub const AntiDiagonalMask = [_]BitBoard{
+    .{ .v = 0x1 },
+    .{ .v = 0x102 },
+    .{ .v = 0x10204 },
+    .{ .v = 0x1020408 },
+    .{ .v = 0x102040810 },
+    .{ .v = 0x10204081020 },
+    .{ .v = 0x1020408102040 },
+    .{ .v = 0x102040810204080 },
+    .{ .v = 0x204081020408000 },
+    .{ .v = 0x408102040800000 },
+    .{ .v = 0x810204080000000 },
+    .{ .v = 0x1020408000000000 },
+    .{ .v = 0x2040800000000000 },
+    .{ .v = 0x4080000000000000 },
+    .{ .v = 0x8000000000000000 },
+};
 
 pub const Square = enum(u6) {
     // zig fmt: off
@@ -85,11 +117,11 @@ pub const Square = enum(u6) {
     }
 
     pub inline fn diagonal(self: Square) u6 {
-        return @intFromEnum(self.rank()) + @intFromEnum(self.file());
+        return @intFromEnum(self.rank()) + 7 - @intFromEnum(self.file());
     }
 
     pub inline fn antiDiagonal(self: Square) u6 {
-        return @intFromEnum(self.rank()) + 7 - @intFromEnum(self.file());
+        return @intFromEnum(self.rank()) + @intFromEnum(self.file());
     }
 
     pub inline fn check(self: Square, d: Direction) bool {
@@ -164,7 +196,7 @@ pub const BitBoard = packed struct {
 
     pub fn popLsb(self: *BitBoard) ?Square {
         if (lsb(self.*)) |ret| {
-            self.unset(ret);
+            _ = self.unset(ret);
             return ret;
         }
 
@@ -222,18 +254,18 @@ pub const BitBoard = packed struct {
         return .{ .v = self.v & ~o.v };
     }
 
-    pub fn print(b: *const BitBoard, wr: anytype) !void {
-        try wr.print("  a b c d e f g h\n", .{});
+    pub fn print(b: *const BitBoard) void {
+        std.debug.print("  a b c d e f g h\n", .{});
         for (0..8) |in| {
             for (0..8) |j| {
                 const i = 7 - in;
 
-                if (j == 0) try wr.print("{} ", .{i + 1});
+                if (j == 0) std.debug.print("{} ", .{i + 1});
                 if (b.check(Square.new(@enumFromInt(i), @enumFromInt(j))))
-                    try wr.print("x", .{})
+                    std.debug.print("x", .{})
                 else
-                    try wr.print(" ", .{});
-                if (j == 7) try wr.print("\n", .{}) else try wr.print(" ", .{});
+                    std.debug.print(" ", .{});
+                if (j == 7) std.debug.print("\n", .{}) else std.debug.print(" ", .{});
             }
         }
     }
@@ -268,7 +300,6 @@ pub const Move = packed struct {
     to: Square,
     typ: MoveType,
 };
-
 
 pub const Remove = struct {
     typ: ?PieceType,

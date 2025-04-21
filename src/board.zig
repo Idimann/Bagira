@@ -443,13 +443,13 @@ pub const Board = struct {
         }
     }
 
-    pub fn print(b: *const Board, wr: anytype) !void {
-        try wr.print("  a b c d e f g h\n", .{});
+    pub fn print(b: *const Board) void {
+        std.debug.print("  a b c d e f g h\n", .{});
         for (0..8) |in| {
             for (0..8) |j| {
                 const i = 7 - in;
 
-                if (j == 0) try wr.print("{} ", .{i + 1});
+                if (j == 0) std.debug.print("{} ", .{i + 1});
                 const ch = b.check(tp.Square.new(@enumFromInt(i), @enumFromInt(j)));
                 if (ch) |che| {
                     const pi = if (che.our)
@@ -470,10 +470,10 @@ pub const Board = struct {
                         .King => "k",
                     };
 
-                    try wr.print("{s}", .{pi});
-                } else try wr.print(" ", .{});
+                    std.debug.print("{s}", .{pi});
+                } else std.debug.print(" ", .{});
 
-                if (j == 7) try wr.print("\n", .{}) else try wr.print(" ", .{});
+                if (j == 7) std.debug.print("\n", .{}) else std.debug.print(" ", .{});
             }
         }
     }
