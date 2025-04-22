@@ -162,6 +162,36 @@ pub const Square = enum(u6) {
         self.* = @enumFromInt(@intFromEnum(self.*) ^ 0b000111);
         return self;
     }
+
+    pub fn toString(self: Square) [2]u8 {
+        const fil = self.file();
+        const ran = self.rank();
+        var ret: [2]u8 = undefined;
+
+        ret[0] = switch (fil) {
+            .FileA => 'a',
+            .FileB => 'b',
+            .FileC => 'c',
+            .FileD => 'd',
+            .FileE => 'e',
+            .FileF => 'f',
+            .FileG => 'g',
+            .FileH => 'h',
+        };
+
+        ret[1] = switch (ran) {
+            .Rank1 => '1',
+            .Rank2 => '2',
+            .Rank3 => '3',
+            .Rank4 => '4',
+            .Rank5 => '5',
+            .Rank6 => '6',
+            .Rank7 => '7',
+            .Rank8 => '8',
+        };
+
+        return ret;
+    }
 };
 
 pub const PieceType = enum(u6) { Pawn, Knight, Bishop, Rook, Queen, King };
@@ -171,6 +201,18 @@ pub const BitBoard = packed struct {
 
     pub inline fn new() BitBoard {
         return .{ .v = 0 };
+    }
+
+    pub inline fn a(self: BitBoard, oth: BitBoard) BitBoard {
+        return .{ .v = self.v & oth.v };
+    }
+
+    pub inline fn o(self: BitBoard, oth: BitBoard) BitBoard {
+        return .{ .v = self.v | oth.v };
+    }
+
+    pub inline fn n(self: BitBoard) BitBoard {
+        return .{ .v = ~self.v };
     }
 
     pub inline fn check(self: BitBoard, s: Square) bool {
@@ -250,8 +292,8 @@ pub const BitBoard = packed struct {
         return .Nothing;
     }
 
-    pub inline fn without(self: BitBoard, o: BitBoard) BitBoard {
-        return .{ .v = self.v & ~o.v };
+    pub inline fn without(self: BitBoard, oth: BitBoard) BitBoard {
+        return .{ .v = self.v & ~oth.v };
     }
 
     pub fn print(b: *const BitBoard) void {
@@ -299,6 +341,23 @@ pub const Move = packed struct {
     from: Square,
     to: Square,
     typ: MoveType,
+
+    pub fn print(self: Move) void {
+        switch (self.typ) {
+            .Normal => std.debug.print("{s}{s}", .{self.from.toString(), self.to.toString()}),
+            .EnPassant => std.debug.print("{s}x", .{self.from.toString()}),
+            .CastleKingside => std.debug.print("O-O", .{}),
+            .CastleQueenside => std.debug.print("O-O-O", .{}),
+            .PromKnight => std.debug.print("{s}N{s}",
+                .{self.from.toString(), self.to.toString()}),
+            .PromBishop => std.debug.print("{s}B{s}",
+                .{self.from.toString(), self.to.toString()}),
+            .PromRook => std.debug.print("{s}R{s}",
+                .{self.from.toString(), self.to.toString()}),
+            .PromQueen => std.debug.print("{s}Q{s}",
+                .{self.from.toString(), self.to.toString()}),
+        }
+    }
 };
 
 pub const Remove = struct {

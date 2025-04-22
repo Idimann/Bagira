@@ -18,6 +18,34 @@ pub const Board = struct {
     castle: tp.Castling,
     mir: Mirror,
 
+    pub inline fn hash(self: *const Board) u64 {
+        var ret = self.o_pieces.v;
+        ret *%= self.t_pieces.v;
+        ret ^= self.pawns.v;
+        ret *%= self.diags.v;
+        ret ^= self.lines.v;
+        ret *%= self.o_king.toBoard().o(self.t_king.toBoard()).v;
+
+        const castle: u4 = @bitCast(self.castle);
+        ret >>= @intCast((@as(i32, castle) & 0b0011) * 4 - (@as(i32, castle) & 0b1100));
+
+        return ret;
+    }
+
+    pub inline fn hash2(self: *const Board) u64 {
+        var ret = self.o_pieces.v;
+        ret ^= self.t_pieces.v;
+        ret *%= self.pawns.v;
+        ret ^= self.diags.v;
+        ret *%= self.lines.v;
+        ret ^= self.o_king.toBoard().o(self.t_king.toBoard()).v;
+
+        const castle: u4 = @bitCast(self.castle);
+        ret >>= @intCast((@as(i32, castle) & 0b1100) * 4 - (@as(i32, castle) & 0b0011));
+
+        return ret;
+    }
+
     pub fn mirror(self: *Board) *Board {
         self.mir.white = !self.mir.white;
         _ = self.castle.mirror();
@@ -214,7 +242,7 @@ pub const Board = struct {
         const pas = self.enPassant().lsb();
         const cas = self.castle;
 
-        self.pawns.v &= self.o_pieces.v | self.t_pieces.v; //Unsetting en passant
+        self.pawns.v &= self.o_pieces.o(self.t_pieces).v; //Unsetting en passant
 
         var ret: ?tp.PieceType = null;
         switch (m.typ) {
@@ -363,7 +391,7 @@ pub const Board = struct {
 
     pub fn remove(self: *Board, m: tp.Move, u: tp.Remove) !void {
         _ = self.mirror();
-        self.pawns.v &= self.o_pieces.v | self.t_pieces.v; //Unsetting old en passant
+        self.pawns.v &= self.o_pieces.o(self.t_pieces).v; //Unsetting old en passant
 
         switch (m.typ) {
             .Normal => {

@@ -5,7 +5,7 @@ const std = @import("std");
 const tp = @import("types.zig");
 const bo = @import("board.zig");
 
-pub const KingAttacks = [64]tp.Bitboard{
+pub const KingAttacks = [64]tp.BitBoard{
     .{ .v = 0x302 },
     .{ .v = 0x705 },
     .{ .v = 0xe0a },
@@ -72,7 +72,7 @@ pub const KingAttacks = [64]tp.Bitboard{
     .{ .v = 0x40c0000000000000 },
 };
 
-pub const KnightAttacks = [64]tp.Bitboard{
+pub const KnightAttacks = [64]tp.BitBoard{
     .{ .v = 0x20400 },
     .{ .v = 0x50800 },
     .{ .v = 0xa1100 },
@@ -139,7 +139,7 @@ pub const KnightAttacks = [64]tp.Bitboard{
     .{ .v = 0x20400000000000 },
 };
 
-pub const PawnAttacks = [64]tp.Bitboard{
+pub const PawnAttacks = [64]tp.BitBoard{
     .{ .v = 0x200 },
     .{ .v = 0x500 },
     .{ .v = 0xa00 },
@@ -274,6 +274,7 @@ const LineMagics = [64]tp.BitBoard{
 };
 var LineShifts = std.mem.zeroes([64]usize);
 var LineMasks = std.mem.zeroes([64]tp.BitBoard);
+var LineMasks2 = std.mem.zeroes([64]tp.BitBoard);
 var LineAttacks = std.mem.zeroes([64][4096]tp.BitBoard);
 
 fn toFile(i: u64, f: tp.File) u64 {
@@ -331,13 +332,18 @@ pub fn initLines() void {
 
     for (0..64) |sq| {
         const square: tp.Square = @enumFromInt(sq);
-        const mask =
-            (tp.BitBoard{ .v = tp.RankMask[@intFromEnum(square.rank())].without(noRank).v |
-            tp.FileMask[@intFromEnum(square.file())].without(noFile).v })
+        const mask = tp.RankMask[@intFromEnum(square.rank())]
+            .without(noRank)
+            .o(tp.FileMask[@intFromEnum(square.file())])
+            .without(noFile)
+            .without(square.toBoard());
+        const mask2 = tp.RankMask[@intFromEnum(square.rank())]
+            .o(tp.FileMask[@intFromEnum(square.file())])
             .without(square.toBoard());
 
         LineShifts[sq] = 64 - mask.popcount();
         LineMasks[sq] = mask;
+        LineMasks2[sq] = mask2;
 
         for (0..(1 << 6)) |ran| {
             for (0..(1 << 6)) |fil| {
@@ -346,7 +352,7 @@ pub fn initLines() void {
                 const pie: tp.BitBoard = .{ .v = (rank << (@intFromEnum(square.rank()) * 8)) |
                     toFile(file, square.file()) };
 
-                if (pie.v & square.toBoard().v != 0) continue;
+                if (pie.check(square)) continue;
 
                 const index = (pie.v *% LineMagics[sq].v) >> @intCast(LineShifts[sq]);
                 LineAttacks[sq][index] = getLineAttacks(square, pie);
@@ -357,6 +363,10 @@ pub fn initLines() void {
 
 pub inline fn getLineMask(s: tp.Square) tp.BitBoard {
     return LineMasks[@intFromEnum(s)];
+}
+
+pub inline fn getLineMask2(s: tp.Square) tp.BitBoard {
+    return LineMasks2[@intFromEnum(s)];
 }
 
 pub inline fn getLine(s: tp.Square, bl: tp.BitBoard) tp.BitBoard {
@@ -434,6 +444,7 @@ const DiagMagics = [64]tp.BitBoard{
 };
 var DiagShifts = std.mem.zeroes([64]usize);
 var DiagMasks = std.mem.zeroes([64]tp.BitBoard);
+var DiagMasks2 = std.mem.zeroes([64]tp.BitBoard);
 var DiagAttacks = std.mem.zeroes([64][4096]tp.BitBoard);
 
 fn toDiagonal(i: u64, d: u6) u64 {
@@ -509,13 +520,17 @@ pub fn initDiags() void {
 
     for (0..64) |sq| {
         const square: tp.Square = @enumFromInt(sq);
-        const mask =
-            (tp.BitBoard{ .v = tp.DiagonalMask[square.diagonal()].v |
-            tp.AntiDiagonalMask[square.antiDiagonal()].v })
-            .without(square.toBoard()).without(no);
+        const mask = tp.DiagonalMask[square.diagonal()]
+            .o(tp.AntiDiagonalMask[square.antiDiagonal()])
+            .without(square.toBoard())
+            .without(no);
+        const mask2 = tp.DiagonalMask[square.diagonal()]
+            .o(tp.AntiDiagonalMask[square.antiDiagonal()])
+            .without(square.toBoard());
 
         DiagShifts[sq] = 64 - mask.popcount();
         DiagMasks[sq] = mask;
+        DiagMasks2[sq] = mask2;
 
         for (0..(1 << 6)) |dia| {
             for (0..(1 << 6)) |ant| {
@@ -524,7 +539,7 @@ pub fn initDiags() void {
                 const pie: tp.BitBoard = .{ .v = toDiagonal(diag, square.diagonal()) |
                     toAntiDiagonal(anti, square.antiDiagonal()) };
 
-                if (pie.v & square.toBoard().v != 0) continue;
+                if (pie.check(square)) continue;
 
                 const index = (pie.v *% DiagMagics[sq].v) >> @intCast(DiagShifts[sq]);
                 DiagAttacks[sq][index] = getDiagAttacks(square, pie);
@@ -535,6 +550,10 @@ pub fn initDiags() void {
 
 pub inline fn getDiagMask(s: tp.Square) tp.BitBoard {
     return DiagMasks[@intFromEnum(s)];
+}
+
+pub inline fn getDiagMask2(s: tp.Square) tp.BitBoard {
+    return DiagMasks2[@intFromEnum(s)];
 }
 
 pub inline fn getDiag(s: tp.Square, bl: tp.BitBoard) tp.BitBoard {
