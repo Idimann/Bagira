@@ -274,7 +274,6 @@ const LineMagics = [64]tp.BitBoard{
 };
 var LineShifts = std.mem.zeroes([64]usize);
 var LineMasks = std.mem.zeroes([64]tp.BitBoard);
-var LineMasks2 = std.mem.zeroes([64]tp.BitBoard);
 var LineAttacks = std.mem.zeroes([64][4096]tp.BitBoard);
 
 fn toFile(i: u64, f: tp.File) u64 {
@@ -325,25 +324,19 @@ fn getLineAttacks(sq: tp.Square, block: tp.BitBoard) tp.BitBoard {
 }
 
 pub fn initLines() void {
-    const noRank = .{ .v = tp.FileMask[@intFromEnum(tp.File.FileA)].v |
-        tp.FileMask[@intFromEnum(tp.File.FileH)].v };
-    const noFile = .{ .v = tp.RankMask[@intFromEnum(tp.Rank.Rank1)].v |
-        tp.RankMask[@intFromEnum(tp.Rank.Rank8)].v };
+    const noRank = tp.FileMask[@intFromEnum(tp.File.FileA)]
+        .o(tp.FileMask[@intFromEnum(tp.File.FileH)]);
+    const noFile = tp.RankMask[@intFromEnum(tp.Rank.Rank1)]
+        .o(tp.RankMask[@intFromEnum(tp.Rank.Rank8)]);
 
     for (0..64) |sq| {
         const square: tp.Square = @enumFromInt(sq);
-        const mask = tp.RankMask[@intFromEnum(square.rank())]
-            .without(noRank)
-            .o(tp.FileMask[@intFromEnum(square.file())])
-            .without(noFile)
-            .without(square.toBoard());
-        const mask2 = tp.RankMask[@intFromEnum(square.rank())]
-            .o(tp.FileMask[@intFromEnum(square.file())])
+        const mask = (tp.RankMask[@intFromEnum(square.rank())].without(noRank))
+            .o(tp.FileMask[@intFromEnum(square.file())].without(noFile))
             .without(square.toBoard());
 
         LineShifts[sq] = 64 - mask.popcount();
         LineMasks[sq] = mask;
-        LineMasks2[sq] = mask2;
 
         for (0..(1 << 6)) |ran| {
             for (0..(1 << 6)) |fil| {
@@ -363,10 +356,6 @@ pub fn initLines() void {
 
 pub inline fn getLineMask(s: tp.Square) tp.BitBoard {
     return LineMasks[@intFromEnum(s)];
-}
-
-pub inline fn getLineMask2(s: tp.Square) tp.BitBoard {
-    return LineMasks2[@intFromEnum(s)];
 }
 
 pub inline fn getLine(s: tp.Square, bl: tp.BitBoard) tp.BitBoard {
@@ -444,7 +433,6 @@ const DiagMagics = [64]tp.BitBoard{
 };
 var DiagShifts = std.mem.zeroes([64]usize);
 var DiagMasks = std.mem.zeroes([64]tp.BitBoard);
-var DiagMasks2 = std.mem.zeroes([64]tp.BitBoard);
 var DiagAttacks = std.mem.zeroes([64][4096]tp.BitBoard);
 
 fn toDiagonal(i: u64, d: u6) u64 {
@@ -513,10 +501,10 @@ fn getDiagAttacks(sq: tp.Square, block: tp.BitBoard) tp.BitBoard {
 }
 
 pub fn initDiags() void {
-    const no = .{ .v = tp.FileMask[@intFromEnum(tp.File.FileA)].v |
-        tp.FileMask[@intFromEnum(tp.File.FileH)].v |
-        tp.FileMask[@intFromEnum(tp.Rank.Rank1)].v |
-        tp.FileMask[@intFromEnum(tp.Rank.Rank8)].v };
+    const no = tp.FileMask[@intFromEnum(tp.File.FileA)]
+        .o(tp.FileMask[@intFromEnum(tp.File.FileH)])
+        .o(tp.RankMask[@intFromEnum(tp.Rank.Rank1)])
+        .o(tp.RankMask[@intFromEnum(tp.Rank.Rank8)]);
 
     for (0..64) |sq| {
         const square: tp.Square = @enumFromInt(sq);
@@ -524,21 +512,19 @@ pub fn initDiags() void {
             .o(tp.AntiDiagonalMask[square.antiDiagonal()])
             .without(square.toBoard())
             .without(no);
-        const mask2 = tp.DiagonalMask[square.diagonal()]
-            .o(tp.AntiDiagonalMask[square.antiDiagonal()])
-            .without(square.toBoard());
 
         DiagShifts[sq] = 64 - mask.popcount();
         DiagMasks[sq] = mask;
-        DiagMasks2[sq] = mask2;
 
         for (0..(1 << 6)) |dia| {
             for (0..(1 << 6)) |ant| {
                 const diag = dia << 1;
                 const anti = ant << 1;
+
                 const pie: tp.BitBoard = .{ .v = toDiagonal(diag, square.diagonal()) |
                     toAntiDiagonal(anti, square.antiDiagonal()) };
 
+                if (pie.a(mask).v != pie.v) continue;
                 if (pie.check(square)) continue;
 
                 const index = (pie.v *% DiagMagics[sq].v) >> @intCast(DiagShifts[sq]);
@@ -550,10 +536,6 @@ pub fn initDiags() void {
 
 pub inline fn getDiagMask(s: tp.Square) tp.BitBoard {
     return DiagMasks[@intFromEnum(s)];
-}
-
-pub inline fn getDiagMask2(s: tp.Square) tp.BitBoard {
-    return DiagMasks2[@intFromEnum(s)];
 }
 
 pub inline fn getDiag(s: tp.Square, bl: tp.BitBoard) tp.BitBoard {

@@ -62,6 +62,10 @@ pub const Board = struct {
         _ = self.o_king.mirror();
         _ = self.t_king.mirror();
 
+        const king = self.o_king;
+        self.o_king = self.t_king;
+        self.t_king = king;
+
         return self;
     }
 

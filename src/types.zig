@@ -203,6 +203,10 @@ pub const BitBoard = packed struct {
         return .{ .v = 0 };
     }
 
+    pub inline fn newFilled() BitBoard {
+        return .{ .v = 0xFFFFFFFFFFFFFFFF };
+    }
+
     pub inline fn a(self: BitBoard, oth: BitBoard) BitBoard {
         return .{ .v = self.v & oth.v };
     }
