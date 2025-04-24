@@ -37,7 +37,16 @@ fn genPawn(
                 else if (al.check(north2))
                     try list.append(move2);
             } else {
-                if (al.check(north)) try list.append(move);
+                if (al.check(north)) {
+                    if (north.rank() == .Rank8) {
+                        try list.appendSlice(&[_]tp.Move{
+                            .{ .from = sq, .to = north, .typ = .PromKnight },
+                            .{ .from = sq, .to = north, .typ = .PromBishop },
+                            .{ .from = sq, .to = north, .typ = .PromRook },
+                            .{ .from = sq, .to = north, .typ = .PromQueen },
+                        });
+                    } else try list.append(move);
+                }
             }
         }
     }
@@ -48,8 +57,16 @@ fn genPawn(
         while (hit.popLsb()) |to| {
             if (p == .Diag and diag_pin != (to.diagonal() == sq.diagonal())) continue;
 
-            if (al.check(to))
-                try list.append(.{ .from = sq, .to = to, .typ = .Normal });
+            if (al.check(to)) {
+                if (to.rank() == .Rank8) {
+                    try list.appendSlice(&[_]tp.Move{
+                        .{ .from = sq, .to = to, .typ = .PromKnight },
+                        .{ .from = sq, .to = to, .typ = .PromBishop },
+                        .{ .from = sq, .to = to, .typ = .PromRook },
+                        .{ .from = sq, .to = to, .typ = .PromQueen },
+                    });
+                } else try list.append(.{ .from = sq, .to = to, .typ = .Normal });
+            }
         }
 
         const en_passant = ta.PawnAttacks[@intFromEnum(sq)]
@@ -220,6 +237,100 @@ pub fn attack_count(b: *const bo.Board, sq: tp.Square, ig: tp.Square) usize {
 
 pub fn gen(b: *const bo.Board, list: *std.ArrayList(tp.Move)) !usize {
     const checks = attack_count_complex(b, b.o_king);
+
+    const pot_pinned_line = checks.lines.op_and(b.o_pieces);
+    const pot_pinned_diag = checks.diags.op_and(b.o_pieces);
+
+    var pin_line =
+        ta.getLine(b.o_king, (b.o_pieces.op_or(b.t_pieces)).without(pot_pinned_line)
+        .op_and(ta.getLineMask(b.o_king))).op_and(b.t_pieces).op_and(b.lines);
+    var pin_diag =
+        ta.getDiag(b.o_king, (b.o_pieces.op_or(b.t_pieces)).without(pot_pinned_diag)
+        .op_and(ta.getDiagMask(b.o_king))).op_and(b.t_pieces).op_and(b.diags);
+
+    var pinned_line = tp.BitBoard.new();
+    var pinned_diag = tp.BitBoard.new();
+    while (pin_line.popLsb()) |pin| {
+        pinned_line.v |= ta.getLine(pin, pot_pinned_line.op_and(ta.getLineMask(pin)))
+            .op_and(pot_pinned_line).v;
+    }
+    while (pin_diag.popLsb()) |pin| {
+        pinned_diag.v |= ta.getDiag(pin, pot_pinned_diag.op_and(ta.getDiagMask(pin)))
+            .op_and(pot_pinned_diag).v;
+    }
+
+    const al = if (checks.count == 1) checks.hitables else tp.BitBoard.newFilled();
+
+    var iter = b.o_pieces;
+    while (iter.popLsb()) |sq| {
+        const pin_state: PinState =
+            if (pinned_line.check(sq))
+            .Line
+        else if (pinned_diag.check(sq))
+            .Diag
+        else
+            .None;
+
+        if (b.o_king == sq)
+            try genKing(b, sq, list)
+        else if (checks.count < 2) {
+            if (b.pawns.check(sq))
+                try genPawn(b, sq, list, pin_state, al)
+            else {
+                const lin = b.lines.check(sq);
+                const dia = b.diags.check(sq);
+
+                if (lin) try genLine(b, sq, list, pin_state, al);
+                if (dia) try genDiag(b, sq, list, pin_state, al);
+                if (!lin and !dia) try genKnight(b, sq, list, pin_state, al);
+            }
+        }
+    }
+
+    // Castling
+    if (checks.count == 0) {
+        const combi = b.o_pieces.op_or(b.t_pieces);
+
+        if (b.castle.ok) {
+            if (b.mir.horiz) {
+                if (!combi.check(.c1) and
+                    !combi.check(.b1) and
+                    attack_count(b, .c1, .c1) == 0 and
+                    attack_count(b, .b1, .b1) == 0)
+                    try list.append(.{ .from = .d1, .to = .b1, .typ = .CastleKingside });
+            } else {
+                if (!combi.check(.f1) and
+                    !combi.check(.g1) and
+                    attack_count(b, .f1, .f1) == 0 and
+                    attack_count(b, .g1, .g1) == 0)
+                    try list.append(.{ .from = .e1, .to = .g1, .typ = .CastleKingside });
+            }
+        }
+        if (b.castle.oq) {
+            if (b.mir.horiz) {
+                if (!combi.check(.e1) and
+                    !combi.check(.f1) and
+                    !combi.check(.g1) and
+                    attack_count(b, .e1, .e1) == 0 and
+                    attack_count(b, .f1, .f1) == 0)
+                    try list.append(.{ .from = .d1, .to = .f1, .typ = .CastleQueenside });
+            } else {
+                if (!combi.check(.d1) and
+                    !combi.check(.c1) and
+                    !combi.check(.b1) and
+                    attack_count(b, .d1, .d1) == 0 and
+                    attack_count(b, .c1, .c1) == 0)
+                    try list.append(.{ .from = .e1, .to = .c1, .typ = .CastleQueenside });
+            }
+        }
+    }
+
+    return checks.count;
+}
+
+pub fn gen_with_checks(b: *const bo.Board, list: *std.ArrayList(tp.Move)) !usize {
+    const checks = attack_count_complex(b, b.o_king);
+    if (checks.count == 0) return 0;
 
     const pot_pinned_line = checks.lines.op_and(b.o_pieces);
     const pot_pinned_diag = checks.diags.op_and(b.o_pieces);

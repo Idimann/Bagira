@@ -125,10 +125,10 @@ pub const Square = enum(u6) {
     }
 
     pub inline fn check(self: Square, d: Direction) bool {
-        const r = rank(self);
-        const f = file(self);
+        const r = @intFromEnum(rank(self));
+        const f = @intFromEnum(file(self));
 
-        switch (d) {
+        return switch (d) {
             .North => r < 7,
             .South => r > 0,
             .East => f < 7,
@@ -137,7 +137,8 @@ pub const Square = enum(u6) {
             .NorthWest => r < 7 and f > 0,
             .SouthEast => r > 0 and f < 7,
             .SouthWest => r > 0 and f > 0,
-        }
+            .NorthNorth => r < 6,
+        };
     }
 
     pub fn apply(self: *Square, dir: Direction) *Square {
@@ -147,6 +148,13 @@ pub const Square = enum(u6) {
 
     pub inline fn getApply(self: Square, dir: Direction) Square {
         return @enumFromInt(@as(i7, @intFromEnum(self)) + @intFromEnum(dir));
+    }
+
+    pub inline fn getApplySafe(self: Square, dir: Direction) ?Square {
+        if (check(self, dir))
+            return @enumFromInt(@as(i7, @intFromEnum(self)) + @intFromEnum(dir))
+        else
+            return null;
     }
 
     pub inline fn toBoard(self: Square) BitBoard {
@@ -374,4 +382,5 @@ pub const Remove = struct {
     typ: ?PieceType,
     pas: ?Square,
     cas: Castling,
+    move_rule: u8,
 };

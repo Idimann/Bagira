@@ -18,6 +18,9 @@ pub const Board = struct {
     castle: tp.Castling,
     mir: Mirror,
 
+    history: std.ArrayList(u64),
+    move_rule: u8, //This is given in plies, not moves
+
     pub inline fn hash(self: *const Board) u64 {
         var ret = self.o_pieces.v;
         ret *%= self.t_pieces.v;
@@ -26,8 +29,8 @@ pub const Board = struct {
         ret ^= self.lines.v;
         ret *%= self.o_king.toBoard().op_or(self.t_king.toBoard()).v;
 
-        const castle: u4 = @bitCast(self.castle);
-        ret >>= @intCast((@as(i32, castle) & 0b0011) * 4 - (@as(i32, castle) & 0b1100));
+        // const castle: u4 = @bitCast(self.castle);
+        // ret >>= @intCast((@as(i32, castle) & 0b0011) * 4 - (@as(i32, castle) & 0b1100));
 
         return ret;
     }
@@ -40,8 +43,8 @@ pub const Board = struct {
         ret *%= self.lines.v;
         ret ^= self.o_king.toBoard().op_or(self.t_king.toBoard()).v;
 
-        const castle: u4 = @bitCast(self.castle);
-        ret >>= @intCast((@as(i32, castle) & 0b1100) * 4 - (@as(i32, castle) & 0b0011));
+        // const castle: u4 = @bitCast(self.castle);
+        // ret >>= @intCast((@as(i32, castle) & 0b1100) * 4 - (@as(i32, castle) & 0b0011));
 
         return ret;
     }
@@ -111,7 +114,7 @@ pub const Board = struct {
     }
 
     const FenStage = enum { Start, Who, Castling, EnPassant };
-    pub fn fromFen(fen: []const u8) !Board {
+    pub fn fromFen(fen: []const u8, alloc: std.mem.Allocator) !Board {
         var stage = FenStage.Start;
         var ret = Board{
             .o_pieces = tp.BitBoard.new(),
@@ -124,6 +127,9 @@ pub const Board = struct {
 
             .castle = .{ .ok = false, .oq = false, .tk = false, .tq = false },
             .mir = .{ .white = true, .horiz = false },
+
+            .history = std.ArrayList(u64).init(alloc),
+            .move_rule = 0,
         };
 
         var first_space = false;
@@ -248,11 +254,17 @@ pub const Board = struct {
         return ret;
     }
 
-    pub fn apply(self: *Board, m: tp.Move) tp.Remove {
+    pub fn apply(self: *Board, m: tp.Move) !tp.Remove {
+        _ = try self.history.append(self.hash());
+
         const pas = self.enPassant().lsb();
         const cas = self.castle;
+        const move_rule = self.move_rule;
+        self.move_rule += 1;
 
         self.pawns.v &= self.o_pieces.op_or(self.t_pieces).v; //Unsetting en passant
+
+        if (self.pawns.check(m.from)) self.move_rule = 0;
 
         var ret: ?tp.PieceType = null;
         switch (m.typ) {
@@ -262,8 +274,11 @@ pub const Board = struct {
                 const pa = self.pawns.move(m.from, m.to);
                 const di = self.diags.move(m.from, m.to);
                 const li = self.lines.move(m.from, m.to);
-                if (pa == .Moved and m.to == m.from.getApply(.NorthNorth)) {
-                    _ = self.pawns.set(m.from.getApply(.North));
+                if (pa == .Moved) {
+                    if (m.from.getApplySafe(.NorthNorth)) |fr| {
+                        if (m.to == fr)
+                            _ = self.pawns.set(m.from.getApply(.North));
+                    }
                 } else if ((li == .Moved or li == .Both) and di != .Moved) {
                     if (m.from == .a1) {
                         if (self.mir.horiz)
@@ -408,11 +423,15 @@ pub const Board = struct {
             },
         }
 
+        if (ret != null) self.move_rule = 0;
+
         _ = self.mirror();
-        return .{ .typ = ret, .pas = pas, .cas = cas };
+        return .{ .typ = ret, .pas = pas, .cas = cas, .move_rule = move_rule };
     }
 
     pub fn remove(self: *Board, m: tp.Move, u: tp.Remove) !void {
+        _ = self.history.pop();
+
         _ = self.mirror();
         self.pawns.v &= self.o_pieces.op_or(self.t_pieces).v; //Unsetting old en passant
 
@@ -488,6 +507,7 @@ pub const Board = struct {
             }
         }
 
+        self.move_rule = u.move_rule;
         self.castle = u.cas;
         if (u.pas) |pas| {
             self.pawns.v |= pas.toBoard().v; //Resetting en passant

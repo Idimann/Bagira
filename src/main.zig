@@ -4,25 +4,37 @@ const bo = @import("board.zig");
 const pos = @import("positions.zig");
 const tab = @import("tablegen.zig");
 const pl = @import("play.zig");
-const en = @import("engine.zig");
+const se = @import("search.zig");
 const ev = @import("eval.zig");
 
 pub fn main() !void {
     tab.initLines();
     tab.initDiags();
+    try se.initRandom();
 
-    var b = try bo.Board.fromFen(pos.Middlegames.spanish);
+    var his_buf: [350 * @sizeOf(u64)]u8 = undefined;
+    var his_fba = std.heap.FixedBufferAllocator.init(&his_buf);
+    const his_alloc = his_fba.allocator();
+    var b = try bo.Board.fromFen(pos.start, his_alloc);
     b.print();
 
-    std.debug.print("{}\n", .{ev.eval(&b)});
+    // std.debug.print("{}\n", .{ev.eval(&b)});
 
-    // const size = 0x1000;
-    // // This is a pretty good formular, assuming a maximum of 128 moves in any position
-    // var buf: [size * @sizeOf(tp.Move)]u8 = undefined;
-    // var fba = std.heap.FixedBufferAllocator.init(&buf);
-    // const alloc = fba.allocator();
-    //
-    // const best = try en.bestAb(&b, 5, alloc);
-    // best.print();
-    // std.debug.print("\n", .{});
+    const depth = 500;
+    const size = 150;
+    // This is a pretty good formular, assuming a maximum of 128 moves in any position
+    var buf: [
+        depth * (@sizeOf(tp.Move) + @sizeOf(tp.Remove)) +
+            size * @sizeOf(tp.Move)
+    ]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&buf);
+    const alloc = fba.allocator();
+
+    var eval: f16 = 0;
+    var count: f16 = 0;
+    for (0..100) |_| {
+        eval += (try se.carloSearch(&b, alloc)).val;
+        count += 1;
+    }
+    std.debug.print("{}\n", .{eval / count});
 }

@@ -19,7 +19,7 @@ pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
         try b.remove(mov, undo);
     }
 
-    list.clearAndFree();
+    list.deinit();
     return ret;
 }
 
@@ -39,5 +39,5 @@ pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     }
     std.debug.print("Total: {}\n", .{total});
 
-    list.clearAndFree();
+    list.deinit();
 }
