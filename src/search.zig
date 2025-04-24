@@ -13,15 +13,15 @@ fn better_eq(f: SearchResult, s: SearchResult) bool {
 }
 
 pub const SearchResult = struct {
-    val: f16, //This has to be between -1 and 1 (-1 <= val <= 1)
+    val: f16,
     dep: u8,
 };
-const SearchMax: SearchResult = .{ .val = 1, .dep = 0 };
-const SearchMin: SearchResult = .{ .val = -1, .dep = 255 };
+const SearchMax: SearchResult = .{ .val = std.math.floatMax(f16), .dep = 0 };
+const SearchMin: SearchResult = .{ .val = -std.math.floatMax(f16), .dep = 255 };
 
 inline fn gameEnd(b: *const bo.Board, mvs: usize, checks: usize) ?f16 {
     // Check and stalemate
-    if (mvs == 0) return if (checks > 0) -1 else 0;
+    if (mvs == 0) return if (checks > 0) -std.math.floatMax(f16) else 0;
 
     //50 move rule
     if (b.move_rule >= 100) return 0;

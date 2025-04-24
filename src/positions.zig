@@ -6,7 +6,9 @@ pub const Mate = struct {
     pub const _4 = "7k/8/8/3K4/4Q3/8/8/8 w - - 0 1";
 };
 
-pub const Openings = struct {};
+pub const Openings = struct {
+    pub const caro_kann = "r2qkbnr/pp1nppp1/2p5/3pPbBp/3P3P/8/PPP2PP1/RN1QKBNR w KQkq - 0 1";
+};
 
 pub const Middlegames = struct {
     pub const spanish =

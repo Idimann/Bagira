@@ -15,26 +15,26 @@ pub fn main() !void {
     var his_buf: [350 * @sizeOf(u64)]u8 = undefined;
     var his_fba = std.heap.FixedBufferAllocator.init(&his_buf);
     const his_alloc = his_fba.allocator();
-    var b = try bo.Board.fromFen(pos.start, his_alloc);
+    var b = try bo.Board.fromFen(pos.Openings.caro_kann, his_alloc);
     b.print();
 
-    // std.debug.print("{}\n", .{ev.eval(&b)});
+    std.debug.print("{}\n", .{ev.eval(&b)});
 
-    const depth = 500;
-    const size = 150;
-    // This is a pretty good formular, assuming a maximum of 128 moves in any position
-    var buf: [
-        depth * (@sizeOf(tp.Move) + @sizeOf(tp.Remove)) +
-            size * @sizeOf(tp.Move)
-    ]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buf);
-    const alloc = fba.allocator();
-
-    var eval: f16 = 0;
-    var count: f16 = 0;
-    for (0..100) |_| {
-        eval += (try se.carloSearch(&b, alloc)).val;
-        count += 1;
-    }
-    std.debug.print("{}\n", .{eval / count});
+    // const depth = 500;
+    // const size = 150;
+    // // This is a pretty good formular, assuming a maximum of 128 moves in any position
+    // var buf: [
+    //     depth * (@sizeOf(tp.Move) + @sizeOf(tp.Remove)) +
+    //         size * @sizeOf(tp.Move)
+    // ]u8 = undefined;
+    // var fba = std.heap.FixedBufferAllocator.init(&buf);
+    // const alloc = fba.allocator();
+    //
+    // var eval: f16 = 0;
+    // var count: f16 = 0;
+    // for (0..100) |_| {
+    //     eval += (try se.carloSearch(&b, alloc)).val;
+    //     count += 1;
+    // }
+    // std.debug.print("{}\n", .{eval / count});
 }
