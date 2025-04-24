@@ -325,14 +325,14 @@ fn getLineAttacks(sq: tp.Square, block: tp.BitBoard) tp.BitBoard {
 
 pub fn initLines() void {
     const noRank = tp.FileMask[@intFromEnum(tp.File.FileA)]
-        .o(tp.FileMask[@intFromEnum(tp.File.FileH)]);
+        .op_or(tp.FileMask[@intFromEnum(tp.File.FileH)]);
     const noFile = tp.RankMask[@intFromEnum(tp.Rank.Rank1)]
-        .o(tp.RankMask[@intFromEnum(tp.Rank.Rank8)]);
+        .op_or(tp.RankMask[@intFromEnum(tp.Rank.Rank8)]);
 
     for (0..64) |sq| {
         const square: tp.Square = @enumFromInt(sq);
         const mask = (tp.RankMask[@intFromEnum(square.rank())].without(noRank))
-            .o(tp.FileMask[@intFromEnum(square.file())].without(noFile))
+            .op_or(tp.FileMask[@intFromEnum(square.file())].without(noFile))
             .without(square.toBoard());
 
         LineShifts[sq] = 64 - mask.popcount();
@@ -502,14 +502,14 @@ fn getDiagAttacks(sq: tp.Square, block: tp.BitBoard) tp.BitBoard {
 
 pub fn initDiags() void {
     const no = tp.FileMask[@intFromEnum(tp.File.FileA)]
-        .o(tp.FileMask[@intFromEnum(tp.File.FileH)])
-        .o(tp.RankMask[@intFromEnum(tp.Rank.Rank1)])
-        .o(tp.RankMask[@intFromEnum(tp.Rank.Rank8)]);
+        .op_or(tp.FileMask[@intFromEnum(tp.File.FileH)])
+        .op_or(tp.RankMask[@intFromEnum(tp.Rank.Rank1)])
+        .op_or(tp.RankMask[@intFromEnum(tp.Rank.Rank8)]);
 
     for (0..64) |sq| {
         const square: tp.Square = @enumFromInt(sq);
         const mask = tp.DiagonalMask[square.diagonal()]
-            .o(tp.AntiDiagonalMask[square.antiDiagonal()])
+            .op_or(tp.AntiDiagonalMask[square.antiDiagonal()])
             .without(square.toBoard())
             .without(no);
 
@@ -524,11 +524,12 @@ pub fn initDiags() void {
                 const pie: tp.BitBoard = .{ .v = toDiagonal(diag, square.diagonal()) |
                     toAntiDiagonal(anti, square.antiDiagonal()) };
 
-                if (pie.a(mask).v != pie.v) continue;
+                if (pie.op_and(mask).v != pie.v) continue;
                 if (pie.check(square)) continue;
 
                 const index = (pie.v *% DiagMagics[sq].v) >> @intCast(DiagShifts[sq]);
-                DiagAttacks[sq][index] = getDiagAttacks(square, pie);
+
+                DiagAttacks[sq][index] = getDiagAttacks(square, pie).without(square.toBoard());
             }
         }
     }

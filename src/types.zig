@@ -207,15 +207,15 @@ pub const BitBoard = packed struct {
         return .{ .v = 0xFFFFFFFFFFFFFFFF };
     }
 
-    pub inline fn a(self: BitBoard, oth: BitBoard) BitBoard {
+    pub inline fn op_and(self: BitBoard, oth: BitBoard) BitBoard {
         return .{ .v = self.v & oth.v };
     }
 
-    pub inline fn o(self: BitBoard, oth: BitBoard) BitBoard {
+    pub inline fn op_or(self: BitBoard, oth: BitBoard) BitBoard {
         return .{ .v = self.v | oth.v };
     }
 
-    pub inline fn n(self: BitBoard) BitBoard {
+    pub inline fn op_neg(self: BitBoard) BitBoard {
         return .{ .v = ~self.v };
     }
 
@@ -272,9 +272,15 @@ pub const BitBoard = packed struct {
         Nothing,
         Moved,
         Removed,
+        Both,
     };
     pub inline fn move(self: *BitBoard, fr: Square, to: Square) CheckType {
         if (self.check(fr)) {
+            if (self.check(to)) {
+                _ = self.unset(fr);
+                return .Both;
+            }
+
             _ = self.unset(fr).set(to);
             return .Moved;
         }

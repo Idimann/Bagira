@@ -1,6 +1,18 @@
 pub const start = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
-pub const Testing = struct {
-    pub const castling = "r2qk2r/pbpnbppp/1p1pp2n/8/2PP1B2/4PN2/PPQNBPPP/R3K2R w KQkq - 0 1";
-    pub const pins = "r1bqk2r/pppp1ppp/2n2n2/4p3/1b2P3/2NP1N2/PPP2PPP/R1BQKB1R w KQkq - 0 1";
+pub const Mate = struct {
+    pub const _1 = "7k/4Q3/6K1/8/8/8/8/8 w - - 0 1";
+    pub const _2 = "7k/4Q3/4K3/8/8/8/8/8 w - - 0 1";
+    pub const _4 = "7k/8/8/3K4/4Q3/8/8/8 w - - 0 1";
+};
+
+pub const Openings = struct {};
+
+pub const Middlegames = struct {
+    pub const spanish =
+        "r3k2r/1bppqppp/p1n2n2/1p2p1B1/1b2P3/1BNP1N2/PPP1QPPP/R3K2R b KQkq - 0 1";
+};
+
+pub const Endgames = struct {
+    pub const simple_two_rooks = "8/2r3k1/8/4R3/6K1/8/8/8 w - - 0 1";
 };

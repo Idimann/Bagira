@@ -24,7 +24,7 @@ pub const Board = struct {
         ret ^= self.pawns.v;
         ret *%= self.diags.v;
         ret ^= self.lines.v;
-        ret *%= self.o_king.toBoard().o(self.t_king.toBoard()).v;
+        ret *%= self.o_king.toBoard().op_or(self.t_king.toBoard()).v;
 
         const castle: u4 = @bitCast(self.castle);
         ret >>= @intCast((@as(i32, castle) & 0b0011) * 4 - (@as(i32, castle) & 0b1100));
@@ -38,7 +38,7 @@ pub const Board = struct {
         ret *%= self.pawns.v;
         ret ^= self.diags.v;
         ret *%= self.lines.v;
-        ret ^= self.o_king.toBoard().o(self.t_king.toBoard()).v;
+        ret ^= self.o_king.toBoard().op_or(self.t_king.toBoard()).v;
 
         const castle: u4 = @bitCast(self.castle);
         ret >>= @intCast((@as(i32, castle) & 0b1100) * 4 - (@as(i32, castle) & 0b0011));
@@ -148,6 +148,8 @@ pub const Board = struct {
                                 add
                             else
                                 @enumFromInt(@intFromEnum(add) + 1);
+
+                            if (add.file() == .FileH and pos == .h1) contin = true;
                         },
                         else => {
                             _ = switch (c) {
@@ -208,7 +210,11 @@ pub const Board = struct {
                         'Q' => ret.castle.oq = true,
                         'k' => ret.castle.tk = true,
                         'q' => ret.castle.tq = true,
-                        ' ' => stage = .EnPassant,
+                        ' ' => {
+                            if (!ret.mir.white)
+                                _ = ret.castle.mirror();
+                            stage = .EnPassant;
+                        },
                         else => return error.InvalidCastle,
                     }
                 },
@@ -246,7 +252,7 @@ pub const Board = struct {
         const pas = self.enPassant().lsb();
         const cas = self.castle;
 
-        self.pawns.v &= self.o_pieces.o(self.t_pieces).v; //Unsetting en passant
+        self.pawns.v &= self.o_pieces.op_or(self.t_pieces).v; //Unsetting en passant
 
         var ret: ?tp.PieceType = null;
         switch (m.typ) {
@@ -258,13 +264,13 @@ pub const Board = struct {
                 const li = self.lines.move(m.from, m.to);
                 if (pa == .Moved and m.to == m.from.getApply(.NorthNorth)) {
                     _ = self.pawns.set(m.from.getApply(.North));
-                } else if (li == .Moved and di != .Moved) {
+                } else if ((li == .Moved or li == .Both) and di != .Moved) {
                     if (m.from == .a1) {
                         if (self.mir.horiz)
                             self.castle.ok = false
                         else
                             self.castle.oq = false;
-                    } else if (m.from == .a8) {
+                    } else if (m.from == .h1) {
                         if (self.mir.horiz)
                             self.castle.oq = false
                         else
@@ -275,13 +281,26 @@ pub const Board = struct {
                     self.castle.ok = false;
                     self.castle.oq = false;
                 }
+                if ((li == .Removed or li == .Both) and di != .Removed and di != .Both) {
+                    if (m.to == .a8) {
+                        if (self.mir.horiz)
+                            self.castle.tk = false
+                        else
+                            self.castle.tq = false;
+                    } else if (m.to == .h8) {
+                        if (self.mir.horiz)
+                            self.castle.tq = false
+                        else
+                            self.castle.tk = false;
+                    }
+                }
 
-                if (th == .Removed) {
-                    if (pa == .Removed) {
+                if (th == .Removed or th == .Both) {
+                    if (pa == .Removed or pa == .Both) {
                         ret = .Pawn;
-                    } else if (di == .Removed) {
-                        ret = if (li == .Removed) .Queen else .Bishop;
-                    } else if (li == .Removed) {
+                    } else if (di == .Removed or di == .Both) {
+                        ret = if (li == .Removed or li == .Both) .Queen else .Bishop;
+                    } else if (li == .Removed or li == .Both) {
                         ret = .Rook;
                     } else {
                         ret = .Knight;
@@ -395,14 +414,14 @@ pub const Board = struct {
 
     pub fn remove(self: *Board, m: tp.Move, u: tp.Remove) !void {
         _ = self.mirror();
-        self.pawns.v &= self.o_pieces.o(self.t_pieces).v; //Unsetting old en passant
+        self.pawns.v &= self.o_pieces.op_or(self.t_pieces).v; //Unsetting old en passant
 
         switch (m.typ) {
             .Normal => {
                 _ = self.o_pieces.move(m.to, m.from);
                 _ = self.pawns.move(m.to, m.from);
                 _ = self.diags.move(m.to, m.from);
-                _= self.lines.move(m.to, m.from);
+                _ = self.lines.move(m.to, m.from);
                 if (self.o_king == m.to) {
                     self.o_king = m.from;
                 }
@@ -456,7 +475,7 @@ pub const Board = struct {
 
         if (u.typ) |typ| {
             _ = self.t_pieces.set(m.to);
-            switch(typ) {
+            switch (typ) {
                 .Pawn => _ = self.pawns.set(m.to),
                 .Knight => {},
                 .Bishop => _ = self.diags.set(m.to),

@@ -9,7 +9,7 @@ pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
     }
 
     var list = std.ArrayList(tp.Move).init(alloc);
-    try mv.gen(b, &list);
+    _ = try mv.gen(b, &list);
 
     var ret: usize = 0;
     for (list.items) |mov| {
@@ -25,12 +25,11 @@ pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
 
 pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     var list = std.ArrayList(tp.Move).init(alloc);
-    try mv.gen(b, &list);
+    _ = try mv.gen(b, &list);
 
     var total: usize = 0;
     for (list.items) |mov| {
         const undo = b.apply(mov);
-
         const res = try perft(b, dep - 1, alloc);
         mov.print();
         std.debug.print(": {}\n", .{res});
