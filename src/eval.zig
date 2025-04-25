@@ -105,9 +105,10 @@ fn eval_part(b: *const bo.Board) f16 {
     return ret;
 }
 
+pub const EvalMax = 100.0;
 pub fn eval(b: *bo.Board) f16 {
     const our = eval_part(b);
     const their = eval_part(b.mirror());
     _ = b.mirror();
-    return our - their;
+    return std.math.clamp((our - their) / EvalMax, -1, 1);
 }

@@ -21,30 +21,42 @@ pub const Board = struct {
     history: std.ArrayList(u64),
     move_rule: u8, //This is given in plies, not moves
 
-    pub inline fn hash(self: *const Board) u64 {
-        var ret = self.o_pieces.v;
-        ret *%= self.t_pieces.v;
-        ret ^= self.pawns.v;
-        ret *%= self.diags.v;
-        ret ^= self.lines.v;
-        ret *%= self.o_king.toBoard().op_or(self.t_king.toBoard()).v;
+    fn scramble(i: u64) u64 {
+        return 0xfad0d7f2fbb059f1 *% (i +% 0xbaad41cdcb839961) +%
+        0x7acec0050bf82f43 *% ((i >> 31) +% 0xd571b3a92b1b2755);
+    }
 
-        // const castle: u4 = @bitCast(self.castle);
-        // ret >>= @intCast((@as(i32, castle) & 0b0011) * 4 - (@as(i32, castle) & 0b1100));
+    fn scramble2(i: u64) u64 {
+        return 0xbaad41cdcb839961 *% (i +% 0xfad0d7f2fbb059f1) +%
+        0xd561b3a92b1b2755 *% ((i >> 31) +% 0x7acec0050bf82f43);
+    }
+
+    pub inline fn hash(self: *const Board) u64 {
+        var ret = scramble(self.o_pieces.v);
+        ret *%= scramble(self.t_pieces.v);
+        ret ^= scramble(self.pawns.v);
+        ret +%= scramble(self.diags.v);
+        ret *%= scramble(self.lines.v);
+        ret ^= scramble(self.o_king.toBoard().op_or(self.t_king.toBoard()).v);
+
+        const castle: u4 = @bitCast(self.castle);
+        const shift = (@as(i32, castle) & 0b0011) * 4 - (@as(i32, castle) & 0b1100);
+        if (shift > 0) ret >>= @intCast(shift) else ret <<= @intCast(-shift);
 
         return ret;
     }
 
     pub inline fn hash2(self: *const Board) u64 {
-        var ret = self.o_pieces.v;
-        ret ^= self.t_pieces.v;
-        ret *%= self.pawns.v;
-        ret ^= self.diags.v;
-        ret *%= self.lines.v;
-        ret ^= self.o_king.toBoard().op_or(self.t_king.toBoard()).v;
+        var ret = scramble2(self.o_pieces.v);
+        ret ^= scramble2(self.t_pieces.v);
+        ret +%= scramble2(self.pawns.v);
+        ret *%= scramble2(self.diags.v);
+        ret ^= scramble2(self.lines.v);
+        ret *%= scramble2(self.o_king.toBoard().op_or(self.t_king.toBoard()).v);
 
-        // const castle: u4 = @bitCast(self.castle);
-        // ret >>= @intCast((@as(i32, castle) & 0b1100) * 4 - (@as(i32, castle) & 0b0011));
+        const castle: u4 = @bitCast(self.castle);
+        const shift = (@as(i32, castle) & 0b1100) * 4 - (@as(i32, castle) & 0b0011);
+        if (shift > 0) ret >>= @intCast(shift) else ret <<= @intCast(-shift);
 
         return ret;
     }

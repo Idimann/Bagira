@@ -82,31 +82,6 @@ fn abSearch(
     return ret;
 }
 
-pub fn bestAb(b: *bo.Board, alloc: std.mem.Allocator) !tp.Move {
-    var list = std.ArrayList(tp.Move).init(alloc);
-    defer list.deinit();
-    _ = try mv.gen(b, &list);
-
-    var move: ?tp.Move = null;
-    var ret = SearchMin;
-
-    for (list.items) |mov| {
-        const undo = try b.apply(mov);
-
-        var val = try abSearch(b, SearchMin, SearchMax, false, alloc);
-        val.val = -val.val;
-        if (better(val, ret)) {
-            move = mov;
-            ret = val;
-        }
-
-        try b.remove(mov, undo);
-    }
-
-    if (move) |m| return m;
-    return error.NoMoveAvailable;
-}
-
 var Random: std.rand.Xoshiro256 = undefined;
 
 pub fn initRandom() !void {
@@ -117,30 +92,79 @@ pub fn initRandom() !void {
     });
 }
 
-pub fn carloSearch(b: *bo.Board, alloc: std.mem.Allocator) !SearchResult {
+const CarloResult = struct {
+    check: u8,
+    explor: u8,
+    result: i8,
+    hash: u64,
+
+    pub inline fn updateCheck(self: *CarloResult) void {
+        self.check = self.explor ^ @as(u8, @bitCast(self.result));
+    }
+};
+const CarloTableSize = (16 * (1 << 20)) / @sizeOf(CarloResult); //16 Mb
+var CarloTable = std.mem.zeroes([CarloTableSize]CarloResult);
+
+fn getCarloInsert(b: *const bo.Board) *CarloResult {
+    const hash = b.hash() % CarloTableSize;
+    const hash2 = b.hash2();
+    const ret = &CarloTable[hash];
+
+    if (ret.check != ret.explor ^ @as(u8, @bitCast(ret.result)) or ret.hash != hash2) {
+        ret.explor = 0;
+        ret.result = 0;
+        ret.hash = hash2;
+        ret.updateCheck();
+    }
+    return ret;
+}
+
+const CarloConstant = std.math.sqrt2;
+pub fn carloSearch(b: *bo.Board, alloc: std.mem.Allocator) !f16 {
     var list = std.ArrayList(tp.Move).init(alloc);
     const checks = try mv.gen(b, &list);
 
     if (gameEnd(b, list.items.len, checks)) |val| {
         list.deinit();
-        return .{ .val = val, .dep = 0 };
+        return val;
     }
 
     var move: ?tp.Move = null;
-    var ret = SearchMin;
 
+    var total: u8 = 0;
+    var onlyZeroes = false;
     for (list.items) |mov| {
         const undo = try b.apply(mov);
 
-        var val = try abSearch(b, SearchMin, SearchMax, false, alloc);
+        const info = getCarloInsert(b);
+        total += info.explor;
+        if (info.explor == 0) onlyZeroes = true;
 
+        try b.remove(mov, undo);
+    }
+
+    var ret = -std.math.floatMax(f16);
+    for (list.items) |mov| {
+        const undo = try b.apply(mov);
+
+        const info = getCarloInsert(b);
+        if (onlyZeroes and info.explor > 0) {
+            try b.remove(mov, undo);
+            continue;
+        }
+
+        var val = (try abSearch(b, SearchMin, SearchMax, false, alloc)).val;
         //Avoiding three fold blindness
-        val.val += @as(f16, @floatCast(Random.random().floatNorm(f64))) * 1e-6;
+        val += @as(f16, @floatCast(Random.random().floatNorm(f64))) * 1e-6;
 
-        val.val = -val.val;
-        if (better(val, ret)) {
+        const result = @as(f16, @floatFromInt(info.result));
+        const explor = @as(f16, @floatFromInt(info.explor));
+        const cmp: f16 = if (onlyZeroes) val else (val + result) / explor +
+            CarloConstant * std.math.sqrt(@log(@as(f16, @floatFromInt(total))) / explor);
+
+        if (cmp > ret) {
             move = mov;
-            ret = val;
+            ret = cmp;
         }
 
         try b.remove(mov, undo);
@@ -149,10 +173,15 @@ pub fn carloSearch(b: *bo.Board, alloc: std.mem.Allocator) !SearchResult {
     if (move) |m| {
         list.deinit();
         const undo = try b.apply(m);
-        const returning = try carloSearch(b, alloc);
+        const returning = -(try carloSearch(b, alloc));
         try b.remove(m, undo);
 
-        return .{ .val = -returning.val, .dep = returning.dep + 1 };
+        const res = getCarloInsert(b);
+        res.explor += 1;
+        res.result += @intFromFloat(returning);
+        res.updateCheck();
+
+        return returning;
     }
 
     return error.NoMoveAvailable;
