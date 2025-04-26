@@ -27,11 +27,6 @@ pub const Board = struct {
         0x7acec0050bf82f43 *% ((i >> 31) +% 0xd571b3a92b1b2755);
     }
 
-    fn scramble2(i: u64) u24 {
-        return @intCast((0xbaad41cdcb839961 *% (i +% 0xfad0d7f2fbb059f1) +%
-        0xd561b3a92b1b2755 *% ((i >> 31) +% 0x7acec0050bf82f43)) >> 40);
-    }
-
     pub inline fn hash(self: *const Board) u64 {
         var ret = scramble(self.o_pieces.v);
         ret *%= scramble(self.t_pieces.v);
@@ -43,17 +38,6 @@ pub const Board = struct {
         const castle: u4 = @bitCast(self.castle);
         const shift = (@as(i32, castle) & 0b0011) * 4 - (@as(i32, castle) & 0b1100);
         if (shift > 0) ret >>= @intCast(shift) else ret <<= @intCast(-shift);
-
-        return ret;
-    }
-
-    pub inline fn hash2(self: *const Board) u24 {
-        var ret = scramble2(self.o_pieces.v);
-        ret ^= scramble2(self.t_pieces.v);
-        ret +%= scramble2(self.pawns.v);
-        ret *%= scramble2(self.diags.v);
-        ret ^= scramble2(self.lines.v);
-        ret *%= scramble2(self.o_king.toBoard().op_or(self.t_king.toBoard()).v);
 
         return ret;
     }
