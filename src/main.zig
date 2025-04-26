@@ -11,7 +11,7 @@ pub fn main() !void {
     tab.initLines();
     tab.initDiags();
 
-    var b = try bo.Board.fromFen(pos.start);
+    var b = try bo.Board.fromFen(pos.Openings.caro_kann);
     b.print();
 
     std.debug.print("{}\n", .{ev.eval(&b)});
