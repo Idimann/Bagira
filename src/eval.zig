@@ -69,8 +69,8 @@ fn eval_bishop(b: *const bo.Board, sq: tp.Square) f16 {
 const RookBase = 4.95;
 const RookRank = [_]f16{ 1, 1, 1.01, 0.95, 0.9, 1.03, 1.3, 1.1 };
 const RookFile = [_]f16{ 0.95, 1, 1.05, 1.12, 1.12, 1.05, 1, 0.95 };
-const RookRankFree = [_]f16{ 0.9, 0.96, 1, 1.05, 1.08, 1.15, 1.2 };
-const RookFileFree = [_]f16{ 0.9, 0.98, 1, 1.08, 1.18, 1.2, 1.3 };
+const RookRankFree = [_]f16{ 0.96, 0.97, 1, 1.01, 1.02, 1.04, 1.07, 1.1 };
+const RookFileFree = [_]f16{ 0.9, 0.98, 1, 1.08, 1.18, 1.2, 1.3, 1.36 };
 fn eval_rook(b: *const bo.Board, sq: tp.Square) f16 {
     var ret: f16 = RookBase;
 

@@ -18,7 +18,8 @@ pub const Board = struct {
     castle: tp.Castling,
     mir: Mirror,
 
-    history: std.ArrayList(u64),
+    history: [2048]u64,
+    history_index: u12,
     move_rule: u8, //This is given in plies, not moves
 
     fn scramble(i: u64) u64 {
@@ -26,9 +27,9 @@ pub const Board = struct {
         0x7acec0050bf82f43 *% ((i >> 31) +% 0xd571b3a92b1b2755);
     }
 
-    fn scramble2(i: u64) u64 {
-        return 0xbaad41cdcb839961 *% (i +% 0xfad0d7f2fbb059f1) +%
-        0xd561b3a92b1b2755 *% ((i >> 31) +% 0x7acec0050bf82f43);
+    fn scramble2(i: u64) u24 {
+        return @intCast((0xbaad41cdcb839961 *% (i +% 0xfad0d7f2fbb059f1) +%
+        0xd561b3a92b1b2755 *% ((i >> 31) +% 0x7acec0050bf82f43)) >> 40);
     }
 
     pub inline fn hash(self: *const Board) u64 {
@@ -46,17 +47,13 @@ pub const Board = struct {
         return ret;
     }
 
-    pub inline fn hash2(self: *const Board) u64 {
+    pub inline fn hash2(self: *const Board) u24 {
         var ret = scramble2(self.o_pieces.v);
         ret ^= scramble2(self.t_pieces.v);
         ret +%= scramble2(self.pawns.v);
         ret *%= scramble2(self.diags.v);
         ret ^= scramble2(self.lines.v);
         ret *%= scramble2(self.o_king.toBoard().op_or(self.t_king.toBoard()).v);
-
-        const castle: u4 = @bitCast(self.castle);
-        const shift = (@as(i32, castle) & 0b1100) * 4 - (@as(i32, castle) & 0b0011);
-        if (shift > 0) ret >>= @intCast(shift) else ret <<= @intCast(-shift);
 
         return ret;
     }
@@ -126,7 +123,7 @@ pub const Board = struct {
     }
 
     const FenStage = enum { Start, Who, Castling, EnPassant };
-    pub fn fromFen(fen: []const u8, alloc: std.mem.Allocator) !Board {
+    pub fn fromFen(fen: []const u8) !Board {
         var stage = FenStage.Start;
         var ret = Board{
             .o_pieces = tp.BitBoard.new(),
@@ -140,7 +137,8 @@ pub const Board = struct {
             .castle = .{ .ok = false, .oq = false, .tk = false, .tq = false },
             .mir = .{ .white = true, .horiz = false },
 
-            .history = std.ArrayList(u64).init(alloc),
+            .history = std.mem.zeroes([2048]u64),
+            .history_index = 0,
             .move_rule = 0,
         };
 
@@ -267,7 +265,8 @@ pub const Board = struct {
     }
 
     pub fn apply(self: *Board, m: tp.Move) !tp.Remove {
-        _ = try self.history.append(self.hash());
+        self.history[self.history_index] = self.hash();
+        self.history_index += 1;
 
         const pas = self.enPassant().lsb();
         const cas = self.castle;
@@ -442,7 +441,7 @@ pub const Board = struct {
     }
 
     pub fn remove(self: *Board, m: tp.Move, u: tp.Remove) !void {
-        _ = self.history.pop();
+        self.history_index -= 1;
 
         _ = self.mirror();
         self.pawns.v &= self.o_pieces.op_or(self.t_pieces).v; //Unsetting old en passant
