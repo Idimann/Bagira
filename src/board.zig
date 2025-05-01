@@ -1,128 +1,102 @@
 const std = @import("std");
 const tp = @import("types.zig");
+const zbr = @import("zobrist.zig");
 
-pub const Mirror = packed struct {
-    white: bool,
-    horiz: bool,
-};
-
+pub const Side = enum(u1) { White, Black };
 pub const Board = struct {
-    o_pieces: tp.BitBoard,
-    t_pieces: tp.BitBoard,
+    w_pieces: tp.BitBoard,
+    b_pieces: tp.BitBoard,
     pawns: tp.BitBoard,
     diags: tp.BitBoard,
     lines: tp.BitBoard,
-    o_king: tp.Square,
-    t_king: tp.Square,
+    w_king: tp.Square,
+    b_king: tp.Square,
 
     castle: tp.Castling,
-    mir: Mirror,
+    side: Side,
 
-    history: [2048]u64,
-    history_index: u12,
+    hash: [2048]u64,
+    hash_in: u12,
     move_rule: u8, //This is given in plies, not moves
 
-    fn scramble(i: u64) u64 {
-        return 0xfad0d7f2fbb059f1 *% (i +% 0xbaad41cdcb839961) +%
-        0x7acec0050bf82f43 *% ((i >> 31) +% 0xd571b3a92b1b2755);
-    }
-
-    pub inline fn hash(self: *const Board) u64 {
-        var ret = scramble(self.o_pieces.v);
-        ret *%= scramble(self.t_pieces.v);
-        ret ^= scramble(self.pawns.v);
-        ret +%= scramble(self.diags.v);
-        ret *%= scramble(self.lines.v);
-        ret ^= scramble(self.o_king.toBoard().op_or(self.t_king.toBoard()).v);
-
-        const castle: u4 = @bitCast(self.castle);
-        const shift = (@as(i32, castle) & 0b0011) * 4 - (@as(i32, castle) & 0b1100);
-        if (shift > 0) ret >>= @intCast(shift) else ret <<= @intCast(-shift);
-
-        return ret;
-    }
-
-    pub fn mirror(self: *Board) *Board {
-        self.mir.white = !self.mir.white;
-        _ = self.castle.mirror();
-
-        self.o_pieces.v ^= self.t_pieces.v;
-        self.t_pieces.v ^= self.o_pieces.v;
-        self.o_pieces.v ^= self.t_pieces.v;
-
-        _ = self.o_pieces.mirror();
-        _ = self.t_pieces.mirror();
-        _ = self.pawns.mirror();
-        _ = self.diags.mirror();
-        _ = self.lines.mirror();
-        _ = self.o_king.mirror();
-        _ = self.t_king.mirror();
-
-        const king = self.o_king;
-        self.o_king = self.t_king;
-        self.t_king = king;
-
-        return self;
-    }
-
-    pub fn mirrorH(self: *Board) *Board {
-        self.mir.horiz = !self.mir.horiz;
-
-        _ = self.o_pieces.mirrorH();
-        _ = self.t_pieces.mirrorH();
-        _ = self.pawns.mirrorH();
-        _ = self.diags.mirrorH();
-        _ = self.lines.mirrorH();
-        _ = self.o_king.mirrorH();
-        _ = self.t_king.mirrorH();
-
-        return self;
-    }
-
-    pub fn check(b: *const Board, s: tp.Square) ?struct { our: bool, typ: tp.PieceType } {
+    pub fn check(b: *const Board, s: tp.Square) ?struct { white: bool, typ: tp.PieceType } {
         const col =
-            if (b.o_pieces.check(s)) true else if (b.t_pieces.check(s)) false else return null;
+            if (b.w_pieces.check(s)) true else if (b.b_pieces.check(s)) false else return null;
 
         if (b.pawns.check(s))
-            return .{ .our = col, .typ = .Pawn };
+            return .{ .white = col, .typ = .Pawn };
 
         if (b.diags.check(s)) {
             if (b.lines.check(s))
-                return .{ .our = col, .typ = .Queen };
+                return .{ .white = col, .typ = .Queen };
 
-            return .{ .our = col, .typ = .Bishop };
+            return .{ .white = col, .typ = .Bishop };
         }
 
         if (b.lines.check(s))
-            return .{ .our = col, .typ = .Rook };
+            return .{ .white = col, .typ = .Rook };
 
-        if (b.o_king == s or b.t_king == s)
-            return .{ .our = col, .typ = .King };
+        if (b.w_king == s or b.b_king == s)
+            return .{ .white = col, .typ = .King };
 
-        return .{ .our = col, .typ = .Knight };
+        return .{ .white = col, .typ = .Knight };
+    }
+
+    fn initHash(self: *Board) void {
+        self.hash[self.hash_in] = 0;
+        var iter = self.w_pieces.op_or(self.b_pieces);
+        while (iter.popLsb()) |sq| {
+            const in = @intFromEnum(sq);
+            if (self.check(sq)) |typ| {
+                if (typ.white)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][in]
+                else
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][in];
+
+                if (typ.typ == .Knight) continue;
+                self.hash[self.hash_in] ^= switch (typ.typ) {
+                    .Pawn => zbr.ZobristTable[2][in],
+                    .Bishop => zbr.ZobristTable[3][in],
+                    .Rook => zbr.ZobristTable[4][in],
+                    .Queen => zbr.ZobristTable[3][in] ^ zbr.ZobristTable[4][in],
+                    .King => zbr.ZobristTable[5][in],
+                    else => unreachable,
+                };
+            }
+        }
+
+        if (self.enPassant().lsb()) |sq|
+            self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(sq)];
+
+        if (self.castle.wk) self.hash[self.hash_in] ^= zbr.CastleTable[0];
+        if (self.castle.wq) self.hash[self.hash_in] ^= zbr.CastleTable[1];
+        if (self.castle.bk) self.hash[self.hash_in] ^= zbr.CastleTable[2];
+        if (self.castle.bq) self.hash[self.hash_in] ^= zbr.CastleTable[3];
+
+        if (self.side == .Black) self.hash[self.hash_in] ^= zbr.SideHash;
     }
 
     pub inline fn enPassant(self: *const Board) tp.BitBoard {
-        return .{ .v = self.pawns.v & ~(self.o_pieces.v | self.t_pieces.v) };
+        return .{ .v = self.pawns.v & ~(self.w_pieces.v | self.b_pieces.v) };
     }
 
     const FenStage = enum { Start, Who, Castling, EnPassant };
     pub fn fromFen(fen: []const u8) !Board {
         var stage = FenStage.Start;
         var ret = Board{
-            .o_pieces = tp.BitBoard.new(),
-            .t_pieces = tp.BitBoard.new(),
+            .w_pieces = tp.BitBoard.new(),
+            .b_pieces = tp.BitBoard.new(),
             .pawns = tp.BitBoard.new(),
             .diags = tp.BitBoard.new(),
             .lines = tp.BitBoard.new(),
-            .o_king = .a1,
-            .t_king = .a1,
+            .w_king = .a1,
+            .b_king = .a1,
 
-            .castle = .{ .ok = false, .oq = false, .tk = false, .tq = false },
-            .mir = .{ .white = true, .horiz = false },
+            .castle = .{ .wk = false, .wq = false, .bk = false, .bq = false },
+            .side = .White,
 
-            .history = std.mem.zeroes([2048]u64),
-            .history_index = 0,
+            .hash = std.mem.zeroes([2048]u64),
+            .hash_in = 0,
             .move_rule = 0,
         };
 
@@ -161,13 +135,13 @@ pub const Board = struct {
                                     _ = ret.lines.set(pos);
                                 },
                                 'N', 'n' => {},
-                                'K' => ret.o_king = pos,
-                                'k' => ret.t_king = pos,
+                                'K' => ret.w_king = pos,
+                                'k' => ret.b_king = pos,
                                 else => return error.InvalidPiece,
                             };
                             _ = switch (c) {
-                                'P', 'N', 'B', 'R', 'Q', 'K' => ret.o_pieces.set(pos),
-                                'p', 'n', 'b', 'r', 'q', 'k' => ret.t_pieces.set(pos),
+                                'P', 'N', 'B', 'R', 'Q', 'K' => ret.w_pieces.set(pos),
+                                'p', 'n', 'b', 'r', 'q', 'k' => ret.b_pieces.set(pos),
                                 else => return error.InvalidPiece,
                             };
 
@@ -192,8 +166,8 @@ pub const Board = struct {
                 },
                 .Who => {
                     switch (c) {
-                        'w' => {},
-                        'b' => _ = ret.mirror().mirrorH(),
+                        'w' => ret.side = .White,
+                        'b' => ret.side = .Black,
                         ' ' => {
                             if (first_space) {
                                 first_space = false;
@@ -206,15 +180,11 @@ pub const Board = struct {
                 .Castling => {
                     switch (c) {
                         '-' => continue,
-                        'K' => ret.castle.ok = true,
-                        'Q' => ret.castle.oq = true,
-                        'k' => ret.castle.tk = true,
-                        'q' => ret.castle.tq = true,
-                        ' ' => {
-                            if (!ret.mir.white)
-                                _ = ret.castle.mirror();
-                            stage = .EnPassant;
-                        },
+                        'K' => ret.castle.wk = true,
+                        'Q' => ret.castle.wq = true,
+                        'k' => ret.castle.bk = true,
+                        'q' => ret.castle.bq = true,
+                        ' ' => stage = .EnPassant,
                         else => return error.InvalidCastle,
                     }
                 },
@@ -231,10 +201,8 @@ pub const Board = struct {
                                 return error.InvalidEnPassant;
                             const file: tp.File = @enumFromInt(en_passant_char - 'a');
                             const rank: tp.Rank = @enumFromInt(c - '1');
-                            var sq = tp.Square.new(rank, file);
-                            if (!ret.mir.white)
-                                _ = sq.mirror().mirrorH();
 
+                            const sq = tp.Square.new(rank, file);
                             _ = ret.pawns.set(sq);
 
                             break;
@@ -245,242 +213,438 @@ pub const Board = struct {
             }
         }
 
+        ret.initHash();
         return ret;
     }
 
-    pub fn apply(self: *Board, m: tp.Move) !tp.Remove {
-        self.history[self.history_index] = self.hash();
-        self.history_index += 1;
+    pub fn apply(self: *Board, m: tp.Move) tp.Remove {
+        self.hash_in += 1;
+        self.hash[self.hash_in] = self.hash[self.hash_in - 1] ^ zbr.SideHash;
 
         const pas = self.enPassant().lsb();
         const cas = self.castle;
         const move_rule = self.move_rule;
         self.move_rule += 1;
 
-        self.pawns.v &= self.o_pieces.op_or(self.t_pieces).v; //Unsetting en passant
+        self.pawns.v &= self.w_pieces.v | self.b_pieces.v; //Unsetting en passant
 
         if (self.pawns.check(m.from)) self.move_rule = 0;
 
         var ret: ?tp.PieceType = null;
         switch (m.typ) {
             .Normal => {
-                _ = self.o_pieces.move(m.from, m.to);
-                const th = self.t_pieces.checkUnset(m.to);
+                const white = self.w_pieces.move(m.from, m.to);
+                const black = self.b_pieces.move(m.from, m.to);
                 const pa = self.pawns.move(m.from, m.to);
                 const di = self.diags.move(m.from, m.to);
                 const li = self.lines.move(m.from, m.to);
+
+                if (white == .Moved or white == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                if (white == .Moved or white == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
+                if (black == .Moved or black == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                if (black == .Moved or black == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
+                if (pa == .Moved or pa == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                if (pa == .Moved or pa == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.to)];
+                if (di == .Moved or di == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[3][@intFromEnum(m.from)];
+                if (di == .Moved or di == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[3][@intFromEnum(m.to)];
+                if (li == .Moved or li == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[4][@intFromEnum(m.from)];
+                if (li == .Moved or li == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[4][@intFromEnum(m.to)];
+
                 if (pa == .Moved) {
-                    if (m.from.getApplySafe(.NorthNorth)) |fr| {
-                        if (m.to == fr)
-                            _ = self.pawns.set(m.from.getApply(.North));
+                    if (self.side == .White) {
+                        if (m.from.getApplySafe(.NorthNorth)) |fr| {
+                            if (m.to == fr) {
+                                const set = m.from.getApply(.North);
+                                _ = self.pawns.set(set);
+                                self.hash[self.hash_in] ^=
+                                    zbr.ZobristTable[2][@intFromEnum(set)];
+                            }
+                        }
+                    } else if (m.from.getApplySafe(.SouthSouth)) |fr| {
+                        if (m.to == fr) {
+                            const set = m.from.getApply(.South);
+                            _ = self.pawns.set(set);
+                            self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(set)];
+                        }
                     }
                 } else if ((li == .Moved or li == .Both) and di != .Moved) {
-                    if (m.from == .a1) {
-                        if (self.mir.horiz)
-                            self.castle.ok = false
-                        else
-                            self.castle.oq = false;
-                    } else if (m.from == .h1) {
-                        if (self.mir.horiz)
-                            self.castle.oq = false
-                        else
-                            self.castle.ok = false;
-                    }
-                } else if (self.o_king == m.from) {
-                    self.o_king = m.to;
-                    self.castle.ok = false;
-                    self.castle.oq = false;
+                    if (m.from == .a1)
+                        self.castle.wq = false
+                    else if (m.from == .h1)
+                        self.castle.wk = false
+                    else if (m.from == .a8)
+                        self.castle.bq = false
+                    else if (m.from == .h8)
+                        self.castle.bk = false;
+                } else if (self.w_king == m.from) {
+                    self.w_king = m.to;
+                    self.castle.wk = false;
+                    self.castle.wq = false;
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[5][@intFromEnum(m.from)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[5][@intFromEnum(m.to)];
+                } else if (self.b_king == m.from) {
+                    self.b_king = m.to;
+                    self.castle.bk = false;
+                    self.castle.bq = false;
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[5][@intFromEnum(m.from)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[5][@intFromEnum(m.to)];
                 }
                 if ((li == .Removed or li == .Both) and di != .Removed and di != .Both) {
-                    if (m.to == .a8) {
-                        if (self.mir.horiz)
-                            self.castle.tk = false
-                        else
-                            self.castle.tq = false;
-                    } else if (m.to == .h8) {
-                        if (self.mir.horiz)
-                            self.castle.tq = false
-                        else
-                            self.castle.tk = false;
-                    }
+                    if (m.to == .a8)
+                        self.castle.bq = false
+                    else if (m.to == .h8)
+                        self.castle.bk = false
+                    else if (m.to == .a1)
+                        self.castle.wq = false
+                    else if (m.to == .h1)
+                        self.castle.wk = false;
                 }
 
-                if (th == .Removed or th == .Both) {
-                    if (pa == .Removed or pa == .Both) {
-                        ret = .Pawn;
-                    } else if (di == .Removed or di == .Both) {
-                        ret = if (li == .Removed or li == .Both) .Queen else .Bishop;
-                    } else if (li == .Removed or li == .Both) {
-                        ret = .Rook;
-                    } else {
+                if (white == .Removed or
+                    white == .Both or
+                    black == .Removed or
+                    black == .Both)
+                {
+                    if (pa == .Removed or pa == .Both)
+                        ret = .Pawn
+                    else if (di == .Removed or di == .Both)
+                        ret = if (li == .Removed or li == .Both) .Queen else .Bishop
+                    else if (li == .Removed or li == .Both)
+                        ret = .Rook
+                    else
                         ret = .Knight;
-                    }
                 }
             },
             .EnPassant => {
-                _ = self.o_pieces.move(m.from, m.to);
+                if (self.side == .White) {
+                    _ = self.w_pieces.move(m.from, m.to);
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
 
-                const hit = m.to.getApply(.South);
-                _ = self.t_pieces.unset(hit);
-                _ = self.pawns.unset(hit).move(m.from, m.to);
+                    const hit = m.to.getApply(.South);
+                    _ = self.b_pieces.unset(hit);
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(hit)];
+
+                    _ = self.pawns.unset(hit).move(m.from, m.to);
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(hit)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                } else {
+                    _ = self.b_pieces.move(m.from, m.to);
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
+
+                    const hit = m.to.getApply(.North);
+                    _ = self.w_pieces.unset(hit);
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(hit)];
+
+                    _ = self.pawns.unset(hit).move(m.from, m.to);
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(hit)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                }
             },
             .CastleKingside => {
-                _ = self.o_pieces.move(m.from, m.to);
-                self.o_king = m.to;
+                _ = self.w_pieces.move(m.from, m.to);
+                _ = self.b_pieces.move(m.from, m.to);
+                if (self.side == .White) self.w_king = m.to else self.b_king = m.to;
 
-                const fr: tp.Square = if (self.mir.horiz) .a1 else .h1;
-                const to: tp.Square = if (self.mir.horiz) .c1 else .f1;
-                _ = self.o_pieces.move(fr, to);
+                if (self.side == .White) {
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
+                } else {
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
+                }
+                self.hash[self.hash_in] ^= zbr.ZobristTable[5][@intFromEnum(m.from)];
+                self.hash[self.hash_in] ^= zbr.ZobristTable[5][@intFromEnum(m.to)];
+
+                const fr: tp.Square = if (self.side == .White) .h1 else .h8;
+                const to: tp.Square = if (self.side == .White) .f1 else .f8;
+                _ = self.w_pieces.move(fr, to);
+                _ = self.b_pieces.move(fr, to);
                 _ = self.lines.move(fr, to);
 
-                self.castle.ok = false;
-                self.castle.oq = false;
+                if (self.side == .White) {
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(fr)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(to)];
+                } else {
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(fr)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(to)];
+                }
+                self.hash[self.hash_in] ^= zbr.ZobristTable[4][@intFromEnum(fr)];
+                self.hash[self.hash_in] ^= zbr.ZobristTable[4][@intFromEnum(to)];
+
+                if (self.side == .White) {
+                    self.castle.wk = false;
+                    self.castle.wq = false;
+                } else {
+                    self.castle.bk = false;
+                    self.castle.bq = false;
+                }
             },
             .CastleQueenside => {
-                _ = self.o_pieces.move(m.from, m.to);
-                self.o_king = m.to;
+                _ = self.w_pieces.move(m.from, m.to);
+                _ = self.b_pieces.move(m.from, m.to);
+                if (self.side == .White) self.w_king = m.to else self.b_king = m.to;
 
-                const fr: tp.Square = if (self.mir.horiz) .h1 else .a1;
-                const to: tp.Square = if (self.mir.horiz) .e1 else .d1;
-                _ = self.o_pieces.move(fr, to);
+                if (self.side == .White) {
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
+                } else {
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
+                }
+                self.hash[self.hash_in] ^= zbr.ZobristTable[5][@intFromEnum(m.from)];
+                self.hash[self.hash_in] ^= zbr.ZobristTable[5][@intFromEnum(m.to)];
+
+                const fr: tp.Square = if (self.side == .White) .a1 else .a8;
+                const to: tp.Square = if (self.side == .White) .d1 else .d8;
+                _ = self.w_pieces.move(fr, to);
+                _ = self.b_pieces.move(fr, to);
                 _ = self.lines.move(fr, to);
 
-                self.castle.ok = false;
-                self.castle.oq = false;
+                if (self.side == .White) {
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(fr)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(to)];
+                } else {
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(fr)];
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(to)];
+                }
+                self.hash[self.hash_in] ^= zbr.ZobristTable[4][@intFromEnum(fr)];
+                self.hash[self.hash_in] ^= zbr.ZobristTable[4][@intFromEnum(to)];
+
+                if (self.side == .White) {
+                    self.castle.wk = false;
+                    self.castle.wq = false;
+                } else {
+                    self.castle.bk = false;
+                    self.castle.bq = false;
+                }
             },
             .PromKnight => {
-                const th = self.t_pieces.checkUnset(m.to);
+                const white = self.w_pieces.move(m.from, m.to);
+                const black = self.b_pieces.move(m.from, m.to);
                 const di = self.diags.checkUnset(m.to);
                 const li = self.lines.checkUnset(m.to);
-                _ = self.o_pieces.move(m.from, m.to);
                 _ = self.pawns.unset(m.from);
-                if (th == .Removed) {
-                    if (di == .Removed) {
-                        ret = if (li == .Removed) .Queen else .Bishop;
-                    } else if (li == .Removed) {
-                        ret = .Rook;
-                    } else {
+
+                if (white == .Moved or white == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                if (white == .Moved or white == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
+                if (black == .Moved or black == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                if (black == .Moved or black == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
+
+                self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+
+                if (white == .Removed or black == .Removed) {
+                    if (di == .Removed)
+                        ret = if (li == .Removed) .Queen else .Bishop
+                    else if (li == .Removed)
+                        ret = .Rook
+                    else
                         ret = .Knight;
-                    }
                 }
             },
             .PromBishop => {
-                const th = self.t_pieces.checkUnset(m.to);
+                const white = self.w_pieces.move(m.from, m.to);
+                const black = self.b_pieces.move(m.from, m.to);
                 const di = self.diags.checkUnset(m.to);
                 const li = self.lines.checkUnset(m.to);
-                _ = self.o_pieces.move(m.from, m.to);
                 _ = self.pawns.unset(m.from);
                 _ = self.diags.set(m.to);
-                if (th == .Removed) {
-                    if (di == .Removed) {
-                        ret = if (li == .Removed) .Queen else .Bishop;
-                    } else if (li == .Removed) {
-                        ret = .Rook;
-                    } else {
+
+                if (white == .Moved or white == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                if (white == .Moved or white == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
+                if (black == .Moved or black == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                if (black == .Moved or black == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
+
+                self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                self.hash[self.hash_in] ^= zbr.ZobristTable[3][@intFromEnum(m.to)];
+
+                if (white == .Removed or black == .Removed) {
+                    if (di == .Removed)
+                        ret = if (li == .Removed) .Queen else .Bishop
+                    else if (li == .Removed)
+                        ret = .Rook
+                    else
                         ret = .Knight;
-                    }
                 }
             },
             .PromRook => {
-                const th = self.t_pieces.checkUnset(m.to);
+                const white = self.w_pieces.move(m.from, m.to);
+                const black = self.b_pieces.move(m.from, m.to);
                 const di = self.diags.checkUnset(m.to);
                 const li = self.lines.checkUnset(m.to);
-                _ = self.o_pieces.move(m.from, m.to);
                 _ = self.pawns.unset(m.from);
                 _ = self.lines.set(m.to);
-                if (th == .Removed) {
-                    if (di == .Removed) {
-                        ret = if (li == .Removed) .Queen else .Bishop;
-                    } else if (li == .Removed) {
-                        ret = .Rook;
-                    } else {
+
+                if (white == .Moved or white == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                if (white == .Moved or white == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
+                if (black == .Moved or black == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                if (black == .Moved or black == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
+
+                self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                self.hash[self.hash_in] ^= zbr.ZobristTable[4][@intFromEnum(m.to)];
+
+                if (white == .Removed or black == .Removed) {
+                    if (di == .Removed)
+                        ret = if (li == .Removed) .Queen else .Bishop
+                    else if (li == .Removed)
+                        ret = .Rook
+                    else
                         ret = .Knight;
-                    }
                 }
             },
             .PromQueen => {
-                const th = self.t_pieces.checkUnset(m.to);
+                const white = self.w_pieces.move(m.from, m.to);
+                const black = self.b_pieces.move(m.from, m.to);
                 const di = self.diags.checkUnset(m.to);
                 const li = self.lines.checkUnset(m.to);
-                _ = self.o_pieces.move(m.from, m.to);
                 _ = self.pawns.unset(m.from);
                 _ = self.diags.set(m.to);
                 _ = self.lines.set(m.to);
-                if (th == .Removed) {
-                    if (di == .Removed) {
-                        ret = if (li == .Removed) .Queen else .Bishop;
-                    } else if (li == .Removed) {
-                        ret = .Rook;
-                    } else {
+
+                if (white == .Moved or white == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                if (white == .Moved or white == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
+                if (black == .Moved or black == .Both)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                if (black == .Moved or black == .Removed)
+                    self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
+
+                self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                self.hash[self.hash_in] ^= zbr.ZobristTable[3][@intFromEnum(m.to)];
+                self.hash[self.hash_in] ^= zbr.ZobristTable[4][@intFromEnum(m.to)];
+
+                if (white == .Removed or black == .Removed) {
+                    if (di == .Removed)
+                        ret = if (li == .Removed) .Queen else .Bishop
+                    else if (li == .Removed)
+                        ret = .Rook
+                    else
                         ret = .Knight;
-                    }
                 }
             },
         }
 
         if (ret != null) self.move_rule = 0;
 
-        _ = self.mirror();
+        if (cas.wk != self.castle.wk) self.hash[self.hash_in] ^= zbr.CastleTable[0];
+        if (cas.wq != self.castle.wq) self.hash[self.hash_in] ^= zbr.CastleTable[1];
+        if (cas.bk != self.castle.bk) self.hash[self.hash_in] ^= zbr.CastleTable[2];
+        if (cas.bq != self.castle.bq) self.hash[self.hash_in] ^= zbr.CastleTable[3];
+
+        self.side = @enumFromInt(~@intFromEnum(self.side));
         return .{ .typ = ret, .pas = pas, .cas = cas, .move_rule = move_rule };
     }
 
     pub fn remove(self: *Board, m: tp.Move, u: tp.Remove) !void {
-        self.history_index -= 1;
+        self.hash_in -= 1;
 
-        _ = self.mirror();
-        self.pawns.v &= self.o_pieces.op_or(self.t_pieces).v; //Unsetting old en passant
+        self.side = @enumFromInt(~@intFromEnum(self.side));
+        self.pawns.v &= self.w_pieces.v | self.b_pieces.v; //Unsetting old en passant
 
         switch (m.typ) {
             .Normal => {
-                _ = self.o_pieces.move(m.to, m.from);
+                _ = self.w_pieces.move(m.to, m.from);
+                _ = self.b_pieces.move(m.to, m.from);
                 _ = self.pawns.move(m.to, m.from);
                 _ = self.diags.move(m.to, m.from);
                 _ = self.lines.move(m.to, m.from);
-                if (self.o_king == m.to) {
-                    self.o_king = m.from;
-                }
+                if (self.w_king == m.to)
+                    self.w_king = m.from
+                else if (self.b_king == m.to)
+                    self.b_king = m.from;
             },
             .EnPassant => {
-                _ = self.o_pieces.move(m.to, m.from);
+                _ = self.w_pieces.move(m.to, m.from);
+                _ = self.b_pieces.move(m.to, m.from);
 
-                const hit = m.to.getApply(.South);
-                _ = self.t_pieces.set(hit);
-                _ = self.pawns.set(hit).move(m.to, m.from);
+                if (self.side == .White) {
+                    const hit = m.to.getApply(.South);
+                    _ = self.b_pieces.set(hit);
+                    _ = self.pawns.set(hit).move(m.to, m.from);
+                } else {
+                    const hit = m.to.getApply(.North);
+                    _ = self.w_pieces.set(hit);
+                    _ = self.pawns.set(hit).move(m.to, m.from);
+                }
             },
             .CastleKingside => {
-                _ = self.o_pieces.move(m.to, m.from);
-                self.o_king = m.from;
+                _ = self.w_pieces.move(m.to, m.from);
+                _ = self.b_pieces.move(m.to, m.from);
+                if (self.side == .White) self.w_king = m.from else self.b_king = m.from;
 
-                const fr: tp.Square = if (self.mir.horiz) .a1 else .h1;
-                const to: tp.Square = if (self.mir.horiz) .c1 else .f1;
-                _ = self.o_pieces.move(to, fr);
+                const fr: tp.Square = if (self.side == .White) .h1 else .h8;
+                const to: tp.Square = if (self.side == .White) .f1 else .f8;
+                if (self.side == .White)
+                    _ = self.w_pieces.move(to, fr)
+                else
+                    _ = self.b_pieces.move(to, fr);
                 _ = self.lines.move(to, fr);
             },
             .CastleQueenside => {
-                _ = self.o_pieces.move(m.to, m.from);
-                self.o_king = m.from;
+                _ = self.w_pieces.move(m.to, m.from);
+                _ = self.b_pieces.move(m.to, m.from);
+                if (self.side == .White) self.w_king = m.from else self.b_king = m.from;
 
-                const fr: tp.Square = if (self.mir.horiz) .h1 else .a1;
-                const to: tp.Square = if (self.mir.horiz) .e1 else .d1;
-                _ = self.o_pieces.move(to, fr);
+                const fr: tp.Square = if (self.side == .White) .a1 else .a8;
+                const to: tp.Square = if (self.side == .White) .d1 else .d8;
+                if (self.side == .White)
+                    _ = self.w_pieces.move(to, fr)
+                else
+                    _ = self.b_pieces.move(to, fr);
                 _ = self.lines.move(to, fr);
             },
             .PromKnight => {
-                _ = self.o_pieces.move(m.to, m.from);
+                if (self.side == .White)
+                    _ = self.w_pieces.move(m.to, m.from)
+                else
+                    _ = self.b_pieces.move(m.to, m.from);
                 _ = self.pawns.set(m.from);
             },
             .PromBishop => {
-                _ = self.o_pieces.move(m.to, m.from);
+                if (self.side == .White)
+                    _ = self.w_pieces.move(m.to, m.from)
+                else
+                    _ = self.b_pieces.move(m.to, m.from);
                 _ = self.pawns.set(m.from);
                 _ = self.diags.unset(m.to);
             },
             .PromRook => {
-                _ = self.o_pieces.move(m.to, m.from);
+                if (self.side == .White)
+                    _ = self.w_pieces.move(m.to, m.from)
+                else
+                    _ = self.b_pieces.move(m.to, m.from);
                 _ = self.pawns.set(m.from);
                 _ = self.lines.unset(m.to);
             },
             .PromQueen => {
-                _ = self.o_pieces.move(m.to, m.from);
+                if (self.side == .White)
+                    _ = self.w_pieces.move(m.to, m.from)
+                else
+                    _ = self.b_pieces.move(m.to, m.from);
                 _ = self.pawns.set(m.from);
                 _ = self.diags.unset(m.to);
                 _ = self.lines.unset(m.to);
@@ -488,7 +652,10 @@ pub const Board = struct {
         }
 
         if (u.typ) |typ| {
-            _ = self.t_pieces.set(m.to);
+            if (self.side == .White)
+                _ = self.b_pieces.set(m.to)
+            else
+                _ = self.w_pieces.set(m.to);
             switch (typ) {
                 .Pawn => _ = self.pawns.set(m.to),
                 .Knight => {},
@@ -510,7 +677,11 @@ pub const Board = struct {
     }
 
     pub fn print(b: *const Board) void {
-        std.debug.print("  a b c d e f g h\n", .{});
+        switch (b.side) {
+            .White => std.debug.print("w", .{}),
+            .Black => std.debug.print("b", .{}),
+        }
+        std.debug.print(" a b c d e f g h\n", .{});
         for (0..8) |in| {
             for (0..8) |j| {
                 const i = 7 - in;
@@ -518,7 +689,7 @@ pub const Board = struct {
                 if (j == 0) std.debug.print("{} ", .{i + 1});
                 const ch = b.check(tp.Square.new(@enumFromInt(i), @enumFromInt(j)));
                 if (ch) |che| {
-                    const pi = if (che.our)
+                    const pi = if (che.white)
                         switch (che.typ) {
                             .Pawn => "P",
                             .Knight => "N",

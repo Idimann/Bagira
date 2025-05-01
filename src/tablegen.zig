@@ -139,7 +139,7 @@ pub const KnightAttacks = [64]tp.BitBoard{
     .{ .v = 0x20400000000000 },
 };
 
-pub const PawnAttacks = [64]tp.BitBoard{
+pub const PawnAttacksWhite = [64]tp.BitBoard{
     .{ .v = 0x200 },
     .{ .v = 0x500 },
     .{ .v = 0xa00 },
@@ -204,6 +204,73 @@ pub const PawnAttacks = [64]tp.BitBoard{
     .{ .v = 0x0 },
     .{ .v = 0x0 },
     .{ .v = 0x0 },
+};
+
+pub const PawnAttacksBlack = [64]tp.BitBoard{
+    .{ .v = 0x0 },
+    .{ .v = 0x0 },
+    .{ .v = 0x0 },
+    .{ .v = 0x0 },
+    .{ .v = 0x0 },
+    .{ .v = 0x0 },
+    .{ .v = 0x0 },
+    .{ .v = 0x0 },
+    .{ .v = 0x2 },
+    .{ .v = 0x5 },
+    .{ .v = 0xa },
+    .{ .v = 0x14 },
+    .{ .v = 0x28 },
+    .{ .v = 0x50 },
+    .{ .v = 0xa0 },
+    .{ .v = 0x40 },
+    .{ .v = 0x200 },
+    .{ .v = 0x500 },
+    .{ .v = 0xa00 },
+    .{ .v = 0x1400 },
+    .{ .v = 0x2800 },
+    .{ .v = 0x5000 },
+    .{ .v = 0xa000 },
+    .{ .v = 0x4000 },
+    .{ .v = 0x20000 },
+    .{ .v = 0x50000 },
+    .{ .v = 0xa0000 },
+    .{ .v = 0x140000 },
+    .{ .v = 0x280000 },
+    .{ .v = 0x500000 },
+    .{ .v = 0xa00000 },
+    .{ .v = 0x400000 },
+    .{ .v = 0x2000000 },
+    .{ .v = 0x5000000 },
+    .{ .v = 0xa000000 },
+    .{ .v = 0x14000000 },
+    .{ .v = 0x28000000 },
+    .{ .v = 0x50000000 },
+    .{ .v = 0xa0000000 },
+    .{ .v = 0x40000000 },
+    .{ .v = 0x200000000 },
+    .{ .v = 0x500000000 },
+    .{ .v = 0xa00000000 },
+    .{ .v = 0x1400000000 },
+    .{ .v = 0x2800000000 },
+    .{ .v = 0x5000000000 },
+    .{ .v = 0xa000000000 },
+    .{ .v = 0x4000000000 },
+    .{ .v = 0x20000000000 },
+    .{ .v = 0x50000000000 },
+    .{ .v = 0xa0000000000 },
+    .{ .v = 0x140000000000 },
+    .{ .v = 0x280000000000 },
+    .{ .v = 0x500000000000 },
+    .{ .v = 0xa00000000000 },
+    .{ .v = 0x400000000000 },
+    .{ .v = 0x2000000000000 },
+    .{ .v = 0x5000000000000 },
+    .{ .v = 0xa000000000000 },
+    .{ .v = 0x14000000000000 },
+    .{ .v = 0x28000000000000 },
+    .{ .v = 0x50000000000000 },
+    .{ .v = 0xa0000000000000 },
+    .{ .v = 0x40000000000000 },
 };
 
 const LineMagics = [64]tp.BitBoard{
@@ -354,14 +421,10 @@ pub fn initLines() void {
     }
 }
 
-pub inline fn getLineMask(s: tp.Square) tp.BitBoard {
-    return LineMasks[@intFromEnum(s)];
-}
-
 pub inline fn getLine(s: tp.Square, bl: tp.BitBoard) tp.BitBoard {
     const shift = LineShifts[@intFromEnum(s)];
     const magic = LineMagics[@intFromEnum(s)];
-    const index = (bl.v *% magic.v) >> @intCast(shift);
+    const index = ((bl.v & LineMasks[@intFromEnum(s)].v) *% magic.v) >> @intCast(shift);
     return LineAttacks[@intFromEnum(s)][index];
 }
 
@@ -535,13 +598,9 @@ pub fn initDiags() void {
     }
 }
 
-pub inline fn getDiagMask(s: tp.Square) tp.BitBoard {
-    return DiagMasks[@intFromEnum(s)];
-}
-
 pub inline fn getDiag(s: tp.Square, bl: tp.BitBoard) tp.BitBoard {
     const shift = DiagShifts[@intFromEnum(s)];
     const magic = DiagMagics[@intFromEnum(s)];
-    const index = (bl.v *% magic.v) >> @intCast(shift);
+    const index = ((bl.v & DiagMasks[@intFromEnum(s)].v) *% magic.v) >> @intCast(shift);
     return DiagAttacks[@intFromEnum(s)][index];
 }

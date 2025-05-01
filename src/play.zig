@@ -2,6 +2,8 @@ const std = @import("std");
 const tp = @import("types.zig");
 const bo = @import("board.zig");
 const mv = @import("movegen.zig");
+const pi = @import("movepick.zig");
+const se = @import("search.zig");
 
 pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
     if (dep == 0) {
@@ -40,4 +42,55 @@ pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     std.debug.print("Total: {}\n", .{total});
 
     list.deinit();
+}
+
+pub fn play(b: *bo.Board, player: bo.Side, dep: u8) !void {
+    if (b.side == player) {
+        const stdin = std.io.getStdIn().reader();
+        _ = try stdin.readByte();
+
+        var buffer: [256]u8 = undefined;
+        var fba = std.heap.FixedBufferAllocator.init(&buffer);
+        const alloc = fba.allocator();
+        var list = std.ArrayList(tp.Move).init(alloc);
+
+        var gen = mv.Maker.init(b);
+        try gen.gen(&list, .Either);
+
+        if (list.items.len == 0) {
+            if (gen.checks > 0)
+                std.debug.print("You lost!\n", .{})
+            else
+                std.debug.print("It's a draw!\n", .{});
+            return;
+        }
+
+        b.print();
+        mv.printList(&list);
+        var buf: [3]u8 = undefined;
+        while (try stdin.readUntilDelimiterOrEof(buf[0..], '\n')) |user_input| {
+            const in = try std.fmt.parseInt(u8, user_input, 10);
+            if (list.items.len < in) continue;
+
+            _ = b.apply(list.items[in - 1]);
+            std.debug.print(" You played: ", .{});
+            list.items[in - 1].print();
+            std.debug.print("\n", .{});
+            break;
+        }
+    } else {
+        // std.debug.print("Generating move\n", .{});
+        try pi.bestMove(b, dep);
+        const table = se.getTrans(b.hash[b.hash_in]);
+        if (table.fine and table.val.has_move) {
+            _ = b.apply(table.val.move);
+            table.val.move.print();
+            std.debug.print(" => {}\n", .{table.val.val});
+        } else {
+            std.debug.print("You won!\n", .{});
+            return;
+        }
+    }
+
+    try play(b, player, dep);
 }

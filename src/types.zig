@@ -10,6 +10,7 @@ pub const Direction = enum(i6) {
     SouthEast = -7,
     SouthWest = -9,
     NorthNorth = 16,
+    SouthSouth = -16,
 };
 
 pub const Rank = enum(u6) {
@@ -138,6 +139,7 @@ pub const Square = enum(u6) {
             .SouthEast => r > 0 and f < 7,
             .SouthWest => r > 0 and f > 0,
             .NorthNorth => r < 6,
+            .SouthSouth => r > 1,
         };
     }
 
@@ -332,17 +334,10 @@ pub const BitBoard = packed struct {
 };
 
 pub const Castling = packed struct {
-    ok: bool,
-    oq: bool,
-    tk: bool,
-    tq: bool,
-
-    pub inline fn mirror(self: *Castling) *Castling {
-        const us: u4 = @bitCast(self.*);
-        self.* = @bitCast((us & 0b0011) << 2 | (us & 0b1100) >> 2);
-
-        return self;
-    }
+    wk: bool,
+    wq: bool,
+    bk: bool,
+    bq: bool,
 };
 
 pub const MoveType = enum(u3) {
@@ -375,6 +370,10 @@ pub const Move = packed struct {
             .PromQueen => std.debug.print("{s}Q{s}",
                 .{self.from.toString(), self.to.toString()}),
         }
+    }
+
+    pub inline fn equals(self: Move, other: Move) bool {
+        return self.from == other.from and self.to == other.to and self.typ == other.typ;
     }
 };
 

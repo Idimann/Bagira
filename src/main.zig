@@ -4,15 +4,18 @@ const bo = @import("board.zig");
 const pos = @import("positions.zig");
 const tab = @import("tablegen.zig");
 const pl = @import("play.zig");
-const se = @import("search.zig");
 const ev = @import("eval.zig");
+const mv = @import("movegen.zig");
+const zbr = @import("zobrist.zig");
+const pi = @import("movepick.zig");
 
 pub fn main() !void {
     tab.initLines();
     tab.initDiags();
+    try zbr.init();
 
-    var b = try bo.Board.fromFen(pos.Openings.caro_kann);
-    b.print();
+    var b = try bo.Board.fromFen(pos.start);
 
-    std.debug.print("{}\n", .{ev.eval(&b)});
+    std.debug.print("Static: {}\n", .{ev.eval(&b)});
+    try pl.play(&b, .Black, 5);
 }
