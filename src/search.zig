@@ -345,15 +345,21 @@ pub fn search(
     while (try nextMove(&stage, &gen, &list, &table)) |mov| {
         const undo = b.apply(mov);
 
-        const next = dep - 1;
+        var next = dep - 1;
         // LMR
-        // if (gen.checks == 0 and al > alpha and (!table.fine or table.val.typ != .Pv)) {
-        //     if (ply >= 6) {
-        //         next -= @divTrunc(ply, 3);
-        //     } else if (ply >= 3) {
-        //         next -= 1;
-        //     }
-        // }
+        if (gen.checks == 0 and
+            // undo.typ == null and
+            al == alpha and
+            do_null and
+            (!table.fine or table.val.typ != .Pv))
+        {
+            const mult: u8 = if (table.fine and table.val.typ == .Cut) 2 else 1;
+
+            if (ply >= 6)
+                next = @min(next, next - @divTrunc(ply, 3) * mult)
+            else if (ply >= 3)
+                next -= @min(next, next - 1 * mult);
+        }
 
         var score: i32 = undefined;
         if (do_null) {
@@ -361,8 +367,8 @@ pub fn search(
             if (score > al and @as(i33, beta) - @as(i33, al) > MaxDepth) {
                 score = -(try search(b, -beta, -al, next, ply + 1, time, alloc));
 
-                // if (score > al)
-                //     score = -(try search(b, -beta, -al, dep - 1, ply + 1, time, alloc));
+                if (score > al)
+                    score = -(try search(b, -beta, -al, dep - 1, ply + 1, time, alloc));
             }
         } else score = -(try search(b, -beta, -al, dep - 1, ply + 1, time, alloc));
 

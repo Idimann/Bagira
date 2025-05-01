@@ -17,5 +17,5 @@ pub fn main() !void {
     var b = try bo.Board.fromFen(pos.start);
 
     std.debug.print("Static: {}\n", .{ev.eval(&b)});
-    try pl.play(&b, .Black, 5);
+    try pl.play(&b, .Black, 6);
 }

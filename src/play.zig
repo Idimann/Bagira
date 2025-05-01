@@ -85,7 +85,7 @@ pub fn play(b: *bo.Board, player: bo.Side, dep: u8) !void {
         if (table.fine and table.val.has_move) {
             _ = b.apply(table.val.move);
             table.val.move.print();
-            std.debug.print(" => {}\n", .{table.val.val});
+            std.debug.print(" => {}\n", .{@divExact(table.val.val, se.MaxDepth)});
         } else {
             std.debug.print("You won!\n", .{});
             return;
