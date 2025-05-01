@@ -56,6 +56,7 @@ pub fn play(b: *bo.Board, player: bo.Side, dep: u8) !void {
 
         var gen = mv.Maker.init(b);
         try gen.gen(&list, .Either);
+        try gen.gen(&list, .Castle);
 
         if (list.items.len == 0) {
             if (gen.checks > 0)

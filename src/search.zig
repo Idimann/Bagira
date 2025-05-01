@@ -44,7 +44,7 @@ pub inline fn historyDependentDraw(
 
     // Repetition
     if (b.hash_in > 1) {
-        var iter: u8 = 1;
+        var iter: u8 = 2;
 
         while (iter < b.move_rule) {
             if (b.hash[b.hash_in - iter] == hash) return true;
