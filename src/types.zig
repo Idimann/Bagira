@@ -204,7 +204,14 @@ pub const Square = enum(u6) {
     }
 };
 
-pub const PieceType = enum(u6) { Pawn, Knight, Bishop, Rook, Queen, King };
+pub const PieceType = enum(u6) {
+    Pawn,
+    Knight,
+    Bishop,
+    Rook,
+    Queen,
+    King,
+};
 
 pub const BitBoard = packed struct {
     v: u64,
@@ -357,18 +364,14 @@ pub const Move = packed struct {
 
     pub fn print(self: Move) void {
         switch (self.typ) {
-            .Normal => std.debug.print("{s}{s}", .{self.from.toString(), self.to.toString()}),
+            .Normal => std.debug.print("{s}{s}", .{ self.from.toString(), self.to.toString() }),
             .EnPassant => std.debug.print("{s}x", .{self.from.toString()}),
             .CastleKingside => std.debug.print("O-O", .{}),
             .CastleQueenside => std.debug.print("O-O-O", .{}),
-            .PromKnight => std.debug.print("{s}N{s}",
-                .{self.from.toString(), self.to.toString()}),
-            .PromBishop => std.debug.print("{s}B{s}",
-                .{self.from.toString(), self.to.toString()}),
-            .PromRook => std.debug.print("{s}R{s}",
-                .{self.from.toString(), self.to.toString()}),
-            .PromQueen => std.debug.print("{s}Q{s}",
-                .{self.from.toString(), self.to.toString()}),
+            .PromKnight => std.debug.print("{s}N{s}", .{ self.from.toString(), self.to.toString() }),
+            .PromBishop => std.debug.print("{s}B{s}", .{ self.from.toString(), self.to.toString() }),
+            .PromRook => std.debug.print("{s}R{s}", .{ self.from.toString(), self.to.toString() }),
+            .PromQueen => std.debug.print("{s}Q{s}", .{ self.from.toString(), self.to.toString() }),
         }
     }
 

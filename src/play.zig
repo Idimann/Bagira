@@ -18,7 +18,7 @@ pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
         const undo = b.apply(mov);
         const res = try perft(b, dep - 1, alloc);
         ret += res;
-        try b.remove(mov, undo);
+        b.remove(mov, undo);
     }
 
     list.deinit();
@@ -35,7 +35,7 @@ pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
         const res = try perft(b, dep - 1, alloc);
         mov.print();
         std.debug.print(": {}\n", .{res});
-        try b.remove(mov, undo);
+        b.remove(mov, undo);
 
         total += res;
     }
@@ -44,7 +44,7 @@ pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     list.deinit();
 }
 
-pub fn play(b: *bo.Board, player: bo.Side, dep: u8) !void {
+pub fn play(b: *bo.Board, player: bo.Side, time: i64, minimal: bool) !void {
     if (b.side == player) {
         const stdin = std.io.getStdIn().reader();
         _ = try stdin.readByte();
@@ -81,17 +81,30 @@ pub fn play(b: *bo.Board, player: bo.Side, dep: u8) !void {
         }
     } else {
         // std.debug.print("Generating move\n", .{});
-        try pi.bestMove(b, dep);
-        const table = se.getTrans(b.hash[b.hash_in]);
-        if (table.fine and table.val.has_move) {
-            _ = b.apply(table.val.move);
-            table.val.move.print();
-            std.debug.print(" => {}\n", .{@divExact(table.val.val, se.MaxDepth)});
+        if (try pi.bestMove(b, time, minimal)) |move| {
+            _ = b.apply(move.move);
+            move.move.print();
+            std.debug.print(" => {} {}\n", .{move.dep, move.eval});
         } else {
             std.debug.print("You won!\n", .{});
             return;
         }
     }
 
-    try play(b, player, dep);
+    try play(b, player, time, minimal);
+}
+
+pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64, minimal: bool) !void {
+    // std.debug.print("Generating move\n", .{});
+    if (try pi.bestMove(b, if (b.side == .White) time1 else time2, minimal)) |move| {
+        _ = b.apply(move.move);
+        move.move.print();
+        std.debug.print(" => {} {}\n", .{move.dep, move.eval});
+        b.print();
+    } else {
+        std.debug.print("{?} won!\n", .{b.side});
+        return;
+    }
+
+    try selfPlay(b, time1, time2, minimal);
 }

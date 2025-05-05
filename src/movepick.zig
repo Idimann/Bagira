@@ -3,26 +3,50 @@ const tp = @import("types.zig");
 const bo = @import("board.zig");
 const se = @import("search.zig");
 
-pub fn bestMove(b: *bo.Board, depth: u8) !void {
-    const max = std.math.maxInt(i32);
+pub const Result = struct {
+    move: tp.Move,
+    eval: i32,
+    dep: u8,
+};
 
-    var buffer: [(1 << 20)]u8 = undefined;
-    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    const alloc = fba.allocator();
+pub fn bestMove(b: *bo.Board, time: i64, minimal: bool) !?Result {
+    const alloc = std.heap.c_allocator;
+    var search = se.Searcher.init(b, alloc, time);
 
-    se.setupSearch();
     var dep: u8 = 1; // This seems more efficient than starting at 1 for some reason
-    while (dep <= depth) {
-        _ = try se.search(
-            b,
-            -max + @as(i32, dep),
-            max,
-            dep,
-            0,
-            @truncate(b.hash_in / 2),
-            alloc,
-        );
+    var prev: i32 = 0;
+    var stack = search.stack;
+    while (true) {
+        prev = (if (dep == 1)
+            search.search(-se.Searcher.MateVal, se.Searcher.MateVal, dep)
+        else
+            search.aspiration(prev, dep)) catch |err| {
+            switch (err) {
+                error.NoTime => break,
+                else => return err,
+            }
+        };
+        stack = search.stack;
 
-        dep += 1; //if(dep < 6) 2 else 1;
+        if (!minimal) {
+            std.debug.print("PV at {}:\n", .{dep});
+            for (0..2048) |i| {
+                if (stack[i].pv) |move| {
+                    std.debug.print("\t=> ", .{});
+                    move.print();
+                    std.debug.print("\n", .{});
+                } else break;
+            }
+        }
+
+        dep += 1;
+        if (stack[0].pv == null) break; // We can't move (stalemate or mate)
+        if (se.Searcher.isMate(prev) and prev > 0) break;
     }
+
+    if (stack[0].pv) |move| {
+        return .{ .move = move, .eval = prev, .dep = dep - 1 };
+    }
+
+    return null;
 }

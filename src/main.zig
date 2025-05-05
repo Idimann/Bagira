@@ -8,6 +8,7 @@ const ev = @import("eval.zig");
 const mv = @import("movegen.zig");
 const zbr = @import("zobrist.zig");
 const pi = @import("movepick.zig");
+const se = @import("search.zig");
 
 pub fn main() !void {
     tab.initLines();
@@ -17,5 +18,6 @@ pub fn main() !void {
     var b = try bo.Board.fromFen(pos.start);
 
     std.debug.print("Static: {}\n", .{ev.eval(&b)});
-    try pl.play(&b, .White, 6);
+
+    try pl.selfPlay(&b, 10000, 10000, true);
 }

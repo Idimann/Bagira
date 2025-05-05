@@ -42,6 +42,18 @@ pub const Board = struct {
         return .{ .white = col, .typ = .Knight };
     }
 
+    pub inline fn pieceType(self: *const Board, s: tp.Square) tp.PieceType {
+        if (s == self.w_king or s == self.b_king) return .King;
+        if (self.pawns.check(s)) return .Pawn;
+        if (self.diags.check(s)) {
+            if (self.lines.check(s)) return .Queen;
+            return .Bishop;
+        }
+        if (self.lines.check(s)) return .Rook;
+
+        return .Knight;
+    }
+
     fn initHash(self: *Board) void {
         self.hash[self.hash_in] = 0;
         var iter = self.w_pieces.op_or(self.b_pieces);
@@ -559,7 +571,7 @@ pub const Board = struct {
         return .{ .typ = ret, .pas = pas, .cas = cas, .move_rule = move_rule };
     }
 
-    pub fn remove(self: *Board, m: tp.Move, u: tp.Remove) !void {
+    pub fn remove(self: *Board, m: tp.Move, u: tp.Remove) void {
         self.hash_in -= 1;
 
         self.side = @enumFromInt(~@intFromEnum(self.side));
@@ -665,7 +677,7 @@ pub const Board = struct {
                     _ = self.diags.set(m.to);
                     _ = self.lines.set(m.to);
                 },
-                else => return error.InvalidRemoveTyp,
+                else => unreachable,
             }
         }
 
