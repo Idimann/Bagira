@@ -21,6 +21,8 @@ const MoveStage = enum {
     Quiets,
 
     // For quiet search
+    QuietTT,
+    QuietKiller,
     GenQuiet,
     Quiet,
 };
@@ -171,7 +173,10 @@ pub const Searcher = struct {
         switch (self.stack[self.ply].stage) {
             .TT => {
                 self.stack[self.ply].stage = .Killer;
-                if (tte.typ == .Fine and gen.isLegal(tte.entry.move))
+                if (tte.typ == .Fine and
+                    tte.entry.typ != .NoMove and
+                    tte.entry.typ != .Upper and
+                    gen.isLegal(tte.entry.move))
                     return tte.entry.move;
             },
             .Killer => {
@@ -230,6 +235,22 @@ pub const Searcher = struct {
             .Quiets => {
                 _ = score_list.popOrNull();
                 return list.popOrNull();
+            },
+            .QuietTT => {
+                self.stack[self.ply].stage = .QuietKiller;
+                if (tte.typ == .Fine and
+                    tte.entry.typ != .NoMove and
+                    tte.entry.typ != .Upper and
+                    gen.isLegal(tte.entry.move))
+                    return tte.entry.move;
+            },
+            .QuietKiller => {
+                self.stack[self.ply].stage = .GenQuiet;
+                if (self.ply > 0) {
+                    if (self.stack[self.ply - 1].killer) |move| {
+                        if (gen.isLegal(move)) return move;
+                    }
+                }
             },
             .GenQuiet => {
                 if (gen.checks > 0)
@@ -305,7 +326,7 @@ pub const Searcher = struct {
         var bestScore = alpha;
         var foundMove = false;
 
-        self.stack[self.ply].stage = .GenQuiet;
+        self.stack[self.ply].stage = .QuietTT;
         while (try self.nextMove(&gen, &list, &score_list, tte)) |move| {
             foundMove = true;
 
@@ -332,10 +353,10 @@ pub const Searcher = struct {
 
             if (score > bestScore) {
                 bestScore = score;
-                bestMove = move;
 
                 if (score > alpha) {
                     alpha = score;
+                    bestMove = move;
 
                     // if (pv) {
                     //     self.updatePv(move);
@@ -357,7 +378,7 @@ pub const Searcher = struct {
             0,
             alpha,
             beta,
-            bestMove.?,
+            bestMove,
             @intCast((self.b.hash_in - self.ply) % std.math.maxInt(u6)),
             tte,
         );
@@ -400,19 +421,23 @@ pub const Searcher = struct {
             (self.ply <= 1 or eval > self.stack[self.ply - 2].static);
 
         // Real pruning
-        if (!inCheck and !improving and !root and !pv and !isMate(beta)) {
-            const futility = eval + PieceValue[0];
+        if (tte.typ != .Fine and
+            !inCheck and
+            !improving and
+            !root and
+            !pv and
+            !isMate(beta))
+        {
+            const futility = eval - PieceValue[0];
 
             // Reverse futility pruning
-            if (depth < 5 and futility >= beta and tte.typ != .Fine) return eval;
+            if (depth < 7 and futility >= beta and tte.typ != .Fine) return eval;
         }
 
         var list = std.ArrayList(tp.Move).init(self.alloc);
         defer list.deinit();
         var score_list = std.ArrayList(i32).init(self.alloc);
         defer score_list.deinit();
-
-        // const futility = eval + PieceValue[0] + @divTrunc(PieceValue[0], 2);
 
         var bestMove: ?tp.Move = null;
         var bestScore: i32 = -MateVal;
@@ -504,10 +529,11 @@ pub const Searcher = struct {
             move_counter += 1;
             if (score > bestScore) {
                 bestScore = score;
-                bestMove = move;
 
                 if (score > alpha) {
                     alpha = score;
+                    bestMove = move;
+
                     if (pv) {
                         self.updatePv(move);
                         self.stack[self.ply + 1].pv_size = 0;
@@ -539,7 +565,7 @@ pub const Searcher = struct {
             depth,
             alpha,
             beta,
-            bestMove.?,
+            bestMove,
             @intCast((self.b.hash_in - self.ply) % std.math.maxInt(u6)),
             tte,
         );
@@ -551,6 +577,12 @@ pub const Searcher = struct {
         var delta = 10 + @as(i32, @intCast(@divTrunc(@abs(prev), @as(u32, ev.PawnBase))));
         var alpha = prev - delta;
         var beta = prev + delta;
+
+        // var count: usize = 0;
+        // for (tt.TT) |en| {
+        //     if (en.check != 0) count += 1;
+        // }
+        // std.debug.print("TT Count: {}\n", .{count});
 
         while (true) {
             const score = try self.search(alpha, beta, depth, false);
