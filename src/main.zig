@@ -19,5 +19,5 @@ pub fn main() !void {
 
     std.debug.print("Static: {}\n", .{ev.eval(&b)});
 
-    try pl.selfPlay(&b, 10000, 10000, true);
+    try pl.play(&b, .Black, 1500, false);
 }

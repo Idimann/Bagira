@@ -24,18 +24,35 @@ const MoveStage = enum {
     Quiet,
 };
 
+fn initReductions() [2][32][32]i12 {
+    var ret = std.mem.zeroes([2][32][32]i12);
+
+    for (1..32) |i| {
+        for (1..32) |j| {
+            const log = @log(@as(f64, @floatFromInt(i))) * @log(@as(f64, @floatFromInt(j)));
+
+            ret[0][i][j] = @intFromFloat(0.38 + log / 3.76);
+            ret[1][i][j] = @intFromFloat(2.01 + log / 2.32);
+        }
+    }
+
+    return ret;
+}
+const Reductions = initReductions();
+
 const MaxDepth = 255;
 const History = struct {
     static: i32,
     stage: MoveStage,
-    pv: ?tp.Move,
+    pv: [MaxDepth]tp.Move,
+    pv_size: u8,
     killer: ?tp.Move,
 };
 
 pub const Searcher = struct {
     alloc: std.mem.Allocator,
     b: *bo.Board,
-    stack: [2048]History,
+    stack: []History,
     ply: u12,
     end_time: i64,
 
@@ -50,15 +67,30 @@ pub const Searcher = struct {
         ev.QueenBase,
     };
 
-    pub fn init(b: *bo.Board, alloc: std.mem.Allocator, time: i64) Searcher {
+    pub fn init(b: *bo.Board, alloc: std.mem.Allocator, time: i64) !Searcher {
+        const stack = try alloc.alloc(History, MaxDepth);
+        for (0..MaxDepth) |i| stack[i] = std.mem.zeroes(History);
+
         return .{
             .alloc = alloc,
             .b = b,
-            .stack = std.mem.zeroes([2048]History),
+            .stack = stack,
             .ply = 0,
             .end_time = std.time.milliTimestamp() + time,
             .history = std.mem.zeroes([2][6][6][64]i32),
         };
+    }
+
+    pub fn deinit(self: *Searcher) void {
+        self.alloc.free(self.stack);
+    }
+
+    pub inline fn clearStack(self: *Searcher) void {
+        for (0..MaxDepth) |i| self.stack[i] = std.mem.zeroes(History);
+    }
+
+    pub inline fn timeDiff(self: *Searcher) i64 {
+        return self.end_time - std.time.milliTimestamp();
     }
 
     inline fn historyDraw(self: *const Searcher) bool {
@@ -78,6 +110,14 @@ pub const Searcher = struct {
         }
 
         return false;
+    }
+
+    fn updatePv(self: *Searcher, move: tp.Move) void {
+        const from = @min(MaxDepth - 1, self.stack[self.ply + 1].pv_size);
+
+        for (0..from) |i| self.stack[self.ply].pv[i + 1] = self.stack[self.ply + 1].pv[i];
+        self.stack[self.ply].pv_size = from + 1;
+        self.stack[self.ply].pv[0] = move;
     }
 
     // This creates some small variance to avoid 3 fold blindness
@@ -159,8 +199,10 @@ pub const Searcher = struct {
             .Captures => {
                 if (list.items.len == 0)
                     self.stack[self.ply].stage = .GenQuiets
-                else
+                else {
+                    _ = score_list.pop();
                     return list.pop();
+                }
             },
             .GenQuiets => {
                 try gen.gen(list, .Quiet);
@@ -182,6 +224,7 @@ pub const Searcher = struct {
                 self.stack[self.ply].stage = .Quiets;
             },
             .Quiets => {
+                _ = score_list.popOrNull();
                 return list.popOrNull();
             },
             .GenQuiet => {
@@ -210,6 +253,7 @@ pub const Searcher = struct {
                 self.stack[self.ply].stage = .Quiet;
             },
             .Quiet => {
+                _ = score_list.popOrNull();
                 return list.popOrNull();
             },
         }
@@ -220,20 +264,16 @@ pub const Searcher = struct {
     pub fn quietSearch(self: *Searcher, a: i32, b: i32) !i32 {
         // Check for three fold repetition and 50 move rule
         if (self.historyDraw()) return drawVal();
-
         if (self.ply >= MaxDepth) return ev.eval(self.b);
 
-        var alpha = a;
-        var beta = b;
-
         // Mate distance pruning (These are the best possible vals at this ply)
-        alpha = @max(alpha, mateVal(self.ply));
-        beta = @min(beta, -mateVal(self.ply + 1));
+        var alpha = @max(a, mateVal(self.ply));
+        const beta = @min(b, -mateVal(self.ply + 1));
         if (alpha >= beta) return alpha;
 
         const gen = mv.Maker.init(self.b);
 
-        // const pv = beta != alpha + 1;
+        const pv = b != a + 1;
         const inCheck = gen.checks > 0;
 
         // TODO: TT probe should be here
@@ -286,6 +326,11 @@ pub const Searcher = struct {
                     alpha = score;
                     bestMove = move;
 
+                    if (pv) {
+                        self.updatePv(move);
+                        self.stack[self.ply + 1].pv_size = 0;
+                    }
+
                     if (score >= beta) break;
                 }
             }
@@ -299,39 +344,38 @@ pub const Searcher = struct {
         return bestScore;
     }
 
-    pub fn search(self: *Searcher, a: i32, b: i32, depth: u8) !i32 {
-        if (self.stack[0].pv != null and
-            std.time.milliTimestamp() >= self.end_time) return error.NoTime;
+    pub fn search(self: *Searcher, a: i32, b: i32, depth: i12, cutnode: bool) !i32 {
+        if (std.time.milliTimestamp() >= self.end_time) return error.NoTime;
 
         if (depth == 0 or self.ply >= MaxDepth) return self.quietSearch(a, b);
 
         // Check for three fold repetition and 50 move rule
         if (self.historyDraw()) return drawVal();
 
-        var alpha = a;
-        var beta = b;
-
         // Mate distance pruning (These are the best possible vals at this ply)
-        alpha = @max(alpha, mateVal(self.ply));
-        beta = @min(beta, -mateVal(self.ply + 1));
+        var alpha = @max(a, mateVal(self.ply));
+        const beta = @min(b, -mateVal(self.ply + 1));
         if (alpha >= beta) return alpha;
 
         const gen = mv.Maker.init(self.b);
 
-        const pv = beta != alpha + 1;
         const inCheck = gen.checks > 0;
-        // const root = self.ply == 0;
+        const pv = b != a + 1;
+        const root = self.ply == 0;
 
         // TODO: TT probe should be here
 
         const eval = if (!inCheck) ev.eval(self.b) else -MateVal;
         self.stack[self.ply].static = eval;
-        // const improving = if (self.ply > 1) eval - self.stack[self.ply - 2] > 0 else false;
+        const improving = !inCheck and
+            (self.ply <= 1 or eval > self.stack[self.ply - 2].static);
 
         var list = std.ArrayList(tp.Move).init(self.alloc);
         defer list.deinit();
         var score_list = std.ArrayList(i32).init(self.alloc);
         defer score_list.deinit();
+
+        // const futility = eval + PieceValue[0] + @divTrunc(PieceValue[0], 2);
 
         var bestMove: ?tp.Move = null;
         var bestScore: i32 = -MateVal;
@@ -341,17 +385,75 @@ pub const Searcher = struct {
 
         self.stack[self.ply].stage = .TT;
         while (try self.nextMove(&gen, &list, &score_list)) |move| {
+            // Futility pruning
+            // if (!inCheck and move_counter != 0 and !pv and depth == 1 and
+            //     (self.b.w_pieces.check(move.to) or self.b.b_pieces.check(move.to)))
+            // {
+            //     if (futility +
+            //         PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
+            //         continue;
+            // }
+
             const undo = self.b.apply(move);
-            self.ply += 1;
 
-            errdefer self.ply -= 1;
             errdefer self.b.remove(move, undo);
+            errdefer self.ply -= 1;
 
-            var score: i32 = -(try self.search(-alpha - 1, -alpha, depth - 1));
-            if (pv and score > alpha)
-                score = -(try self.search(-beta, -alpha, depth - 1));
+            var score: i32 = undefined;
+            var next_depth = depth - 1;
 
+            // Check extensions
+            if (self.ply < 3 and inCheck) next_depth += 1;
+
+            const quiet = undo.typ == null;
+
+            // Pruning
+            const min_count = @max(
+                0,
+                @as(u3, @intFromBool(pv)) +
+                    @as(u3, @intFromBool(root)) +
+                    @as(u3, @intFromBool(!quiet)),
+            );
+            if (depth > 2 and !root and move_counter > min_count) {
+                var R: i12 = 0;
+
+                // LMR
+                R += Reductions[@intFromBool(quiet)][@intCast(depth)][@intCast(self.ply)];
+
+                if (cutnode) R += 2;
+
+                // Various pruning reduction criteria
+                if (pv) R -= 1;
+                if (inCheck) R -= 1;
+                if (self.stack[self.ply].stage == .Killer) R -= 1;
+                if (improving) R -= 1;
+
+                const r_depth = std.math.clamp(
+                    next_depth - R,
+                    @min(1, next_depth),
+                    next_depth,
+                );
+
+                self.ply += 1;
+                score = -(try self.search(-alpha - 1, -alpha, r_depth, true));
+                self.ply -= 1;
+
+                if (score > alpha and r_depth < next_depth) {
+                    self.ply += 1;
+                    score = -(try self.search(-alpha - 1, -alpha, next_depth, !cutnode));
+                    self.ply -= 1;
+                }
+            } else if (!pv or move_counter > 0) {
+                self.ply += 1;
+                score = -(try self.search(-alpha - 1, -alpha, next_depth, !cutnode));
+                self.ply -= 1;
+            }
+
+            self.ply += 1;
+            if (pv and (move_counter == 0 or score > alpha))
+                score = -(try self.search(-beta, -alpha, next_depth, false));
             self.ply -= 1;
+
             self.b.remove(move, undo);
 
             // Updating history
@@ -370,14 +472,19 @@ pub const Searcher = struct {
                     @intFromEnum(gen.b.pieceType(move.to));
                 histories[move_counter] = &self.history[1][index1][index2][index3];
             }
-            move_counter += 1;
 
+            move_counter += 1;
             if (score > bestScore) {
                 bestScore = score;
 
                 if (score > alpha) {
                     alpha = score;
                     bestMove = move;
+
+                    if (pv) {
+                        self.updatePv(move);
+                        self.stack[self.ply + 1].pv_size = 0;
+                    }
 
                     if (score >= beta) {
                         // Updating history
@@ -392,12 +499,6 @@ pub const Searcher = struct {
             }
         }
 
-        if (pv) {
-            if (bestMove) |move| {
-                self.stack[self.ply].pv = move;
-            }
-        }
-
         // Removing killer move
         self.stack[self.ply].killer = null;
 
@@ -409,23 +510,24 @@ pub const Searcher = struct {
         return bestScore;
     }
 
-    pub fn aspiration(self: *Searcher, prev: i32, depth: u8) !i32 {
-        const delta = 10 + @as(i32, @intCast(@divTrunc(@abs(prev), @as(u32, ev.PawnBase))));
+    pub fn aspiration(self: *Searcher, prev: i32, depth: i12) !i32 {
+        var delta = 10 + @as(i32, @intCast(@divTrunc(@abs(prev), @as(u32, ev.PawnBase))));
         var alpha = prev - delta;
         var beta = prev + delta;
 
         while (true) {
-            const score = try self.search(alpha, beta, depth);
+            const score = try self.search(alpha, beta, depth, false);
+            if (isMate(score)) return score;
+
 
             if (score <= alpha) {
+                beta = @divFloor(alpha + beta, 2) + 1;
                 alpha -= delta;
-                beta -= @divTrunc(delta, 4);
             } else if (score >= beta) {
                 beta += delta;
-                alpha += @divTrunc(delta, 4);
-            } else {
-                return score;
-            }
+            } else return score;
+
+            delta += @divFloor(delta, 3);
         }
     }
 };

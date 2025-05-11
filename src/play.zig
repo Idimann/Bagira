@@ -84,7 +84,11 @@ pub fn play(b: *bo.Board, player: bo.Side, time: i64, minimal: bool) !void {
         if (try pi.bestMove(b, time, minimal)) |move| {
             _ = b.apply(move.move);
             move.move.print();
-            std.debug.print(" => {} {}\n", .{move.dep, move.eval});
+            if (se.Searcher.isMate(move.eval)) {
+                var len = @divFloor(move.dep, 2);
+                if (@rem(move.dep, 2) == 0) len -= 1;
+                std.debug.print(" => Mate in {}\n", .{len});
+            } else std.debug.print(" => {} {}\n", .{ move.dep, move.eval });
         } else {
             std.debug.print("You won!\n", .{});
             return;
@@ -99,7 +103,11 @@ pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64, minimal: bool) !void {
     if (try pi.bestMove(b, if (b.side == .White) time1 else time2, minimal)) |move| {
         _ = b.apply(move.move);
         move.move.print();
-        std.debug.print(" => {} {}\n", .{move.dep, move.eval});
+        if (se.Searcher.isMate(move.eval)) {
+            var len = @divFloor(move.dep, 2);
+            if (@rem(move.dep, 2) == 0) len -= 1;
+            std.debug.print(" => Mate in {}\n", .{len});
+        } else std.debug.print(" => {} {}\n", .{ move.dep, move.eval });
         b.print();
     } else {
         std.debug.print("{?} won!\n", .{b.side});
