@@ -13,9 +13,7 @@ pub fn bestMove(b: *bo.Board, time: i64, minimal: bool) !?Result {
     const alloc = std.heap.c_allocator;
     var search = try se.Searcher.init(b, alloc, time);
 
-    // We start at 2 and iter in steps of 2
-    // (idk if this is actually smart, but it seems like it)
-    const iter = 2;
+    const iter = 1;
     var dep: i12 = iter;
     var prev: i32 = 0;
     var pv = search.stack[0].pv;
@@ -50,7 +48,7 @@ pub fn bestMove(b: *bo.Board, time: i64, minimal: bool) !?Result {
 
     search.deinit();
     if (pv_size != 0) {
-        return .{ .move = pv[0], .eval = prev, .dep = dep - 1 };
+        return .{ .move = pv[0], .eval = prev, .dep = dep - iter };
     }
 
     return null;

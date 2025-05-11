@@ -3,6 +3,7 @@ const tp = @import("types.zig");
 const bo = @import("board.zig");
 const mv = @import("movegen.zig");
 const ev = @import("eval.zig");
+const tt = @import("tt.zig");
 
 const MoveStage = enum {
     // Hash move
@@ -165,10 +166,13 @@ pub const Searcher = struct {
         gen: *const mv.Maker,
         list: *std.ArrayList(tp.Move),
         score_list: *std.ArrayList(i32),
+        tte: tt.TT_Result,
     ) !?tp.Move {
         switch (self.stack[self.ply].stage) {
             .TT => {
                 self.stack[self.ply].stage = .Killer;
+                if (tte.typ == .Fine and gen.isLegal(tte.entry.move))
+                    return tte.entry.move;
             },
             .Killer => {
                 self.stack[self.ply].stage = .GenCaptures;
@@ -258,7 +262,7 @@ pub const Searcher = struct {
             },
         }
 
-        return self.nextMove(gen, list, score_list);
+        return self.nextMove(gen, list, score_list, tte);
     }
 
     pub fn quietSearch(self: *Searcher, a: i32, b: i32) !i32 {
@@ -276,7 +280,14 @@ pub const Searcher = struct {
         const pv = b != a + 1;
         const inCheck = gen.checks > 0;
 
-        // TODO: TT probe should be here
+        // TT Probe
+        const tte = tt.probe(self.b);
+
+        // Trust the tt entry if it's usable
+        if (!pv and
+            tte.typ == .Fine and
+            tte.entry.usable(alpha, beta))
+            return tte.entry.score;
 
         const eval = if (!inCheck) ev.eval(self.b) else -MateVal;
         self.stack[self.ply].static = eval;
@@ -295,7 +306,7 @@ pub const Searcher = struct {
         var foundMove = false;
 
         self.stack[self.ply].stage = .GenQuiet;
-        while (try self.nextMove(&gen, &list, &score_list)) |move| {
+        while (try self.nextMove(&gen, &list, &score_list, tte)) |move| {
             foundMove = true;
 
             // Pruning, only if not in check
@@ -321,15 +332,15 @@ pub const Searcher = struct {
 
             if (score > bestScore) {
                 bestScore = score;
+                bestMove = move;
 
                 if (score > alpha) {
                     alpha = score;
-                    bestMove = move;
 
-                    if (pv) {
-                        self.updatePv(move);
-                        self.stack[self.ply + 1].pv_size = 0;
-                    }
+                    // if (pv) {
+                    //     self.updatePv(move);
+                    //     self.stack[self.ply + 1].pv_size = 0;
+                    // }
 
                     if (score >= beta) break;
                 }
@@ -339,7 +350,17 @@ pub const Searcher = struct {
         // Check and stalemate
         if (!foundMove and inCheck) return mateVal(self.ply);
 
-        //TODO: TT insert should be here
+        // TT insert
+        tt.store(
+            self.b,
+            bestScore,
+            0,
+            alpha,
+            beta,
+            bestMove.?,
+            @intCast((self.b.hash_in - self.ply) % std.math.maxInt(u6)),
+            tte,
+        );
 
         return bestScore;
     }
@@ -363,12 +384,28 @@ pub const Searcher = struct {
         const pv = b != a + 1;
         const root = self.ply == 0;
 
-        // TODO: TT probe should be here
+        // TT Probe
+        const tte = tt.probe(self.b);
 
-        const eval = if (!inCheck) ev.eval(self.b) else -MateVal;
+        // Trust the tt entry if it's usable
+        if (!pv and
+            tte.typ == .Fine and
+            tte.entry.depth >= depth and
+            tte.entry.usable(alpha, beta))
+            return tte.entry.score;
+
+        const eval = if (tte.typ == .Fine) tte.entry.score else ev.eval(self.b);
         self.stack[self.ply].static = eval;
         const improving = !inCheck and
             (self.ply <= 1 or eval > self.stack[self.ply - 2].static);
+
+        // Real pruning
+        if (!inCheck and !improving and !root and !pv and !isMate(beta)) {
+            const futility = eval + PieceValue[0];
+
+            // Reverse futility pruning
+            if (depth < 5 and futility >= beta and tte.typ != .Fine) return eval;
+        }
 
         var list = std.ArrayList(tp.Move).init(self.alloc);
         defer list.deinit();
@@ -384,16 +421,7 @@ pub const Searcher = struct {
         var move_counter: u6 = 0;
 
         self.stack[self.ply].stage = .TT;
-        while (try self.nextMove(&gen, &list, &score_list)) |move| {
-            // Futility pruning
-            // if (!inCheck and move_counter != 0 and !pv and depth == 1 and
-            //     (self.b.w_pieces.check(move.to) or self.b.b_pieces.check(move.to)))
-            // {
-            //     if (futility +
-            //         PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
-            //         continue;
-            // }
-
+        while (try self.nextMove(&gen, &list, &score_list, tte)) |move| {
             const undo = self.b.apply(move);
 
             errdefer self.b.remove(move, undo);
@@ -476,11 +504,10 @@ pub const Searcher = struct {
             move_counter += 1;
             if (score > bestScore) {
                 bestScore = score;
+                bestMove = move;
 
                 if (score > alpha) {
                     alpha = score;
-                    bestMove = move;
-
                     if (pv) {
                         self.updatePv(move);
                         self.stack[self.ply + 1].pv_size = 0;
@@ -505,7 +532,17 @@ pub const Searcher = struct {
         // Check and stalemate
         if (move_counter == 0) return if (inCheck) mateVal(self.ply) else drawVal();
 
-        //TODO: TT insert should be here
+        // TT insert
+        tt.store(
+            self.b,
+            bestScore,
+            depth,
+            alpha,
+            beta,
+            bestMove.?,
+            @intCast((self.b.hash_in - self.ply) % std.math.maxInt(u6)),
+            tte,
+        );
 
         return bestScore;
     }
@@ -518,7 +555,6 @@ pub const Searcher = struct {
         while (true) {
             const score = try self.search(alpha, beta, depth, false);
             if (isMate(score)) return score;
-
 
             if (score <= alpha) {
                 beta = @divFloor(alpha + beta, 2) + 1;
