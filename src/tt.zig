@@ -4,7 +4,6 @@ const bo = @import("board.zig");
 
 pub const TT_Type = enum(u2) {
     Lower,
-    NoMove,
     Upper,
     Exact,
 };
@@ -28,7 +27,7 @@ pub const TT_Entry = struct {
     }
 
     pub inline fn usable(self: *const TT_Entry, alpha: i32, beta: i32) bool {
-        return self.typ == .Exact or self.typ == .NoMove or
+        return self.typ == .Exact or
             (self.typ == .Lower and self.score >= beta) or
             (self.typ == .Upper and self.score < alpha);
     }
@@ -57,25 +56,23 @@ inline fn put(
     score: i32,
     move: ?tp.Move,
     depth: i12,
-    alpha: i32,
-    beta: i32,
+    lower_bound: i32,
+    upper_bound: i32,
     insert_time: u6,
 ) void {
     const index = b.hash[b.hash_in] % TT_Size;
     TT[index] = .{
         .check = 0,
         .hash = b.hash[b.hash_in],
-        .score = score,
+        .score = std.math.clamp(score, lower_bound, upper_bound),
         .move = if (move) |mov| mov else std.mem.zeroes(tp.Move),
         .depth = @intCast(depth), //This is a u8 to allow for more room for insert_time
-        .typ = if (score >= beta)
+        .typ = if (score >= upper_bound)
             .Lower
-        else if (score < alpha)
+        else if (score <= lower_bound)
             .Upper
-        else if (move) |_|
-            .Exact
         else
-            .NoMove,
+            .Exact,
         .insert_time = insert_time,
     };
 
@@ -86,18 +83,34 @@ pub inline fn store(
     b: *const bo.Board,
     score: i32,
     depth: i12,
-    alpha: i32,
-    beta: i32,
+    lower_bound: i32,
+    upper_bound: i32,
     bestMove: ?tp.Move,
     insert_time: u6,
     tte: TT_Result,
 ) void {
-    if (tte.typ == .CorruptErr) put(b, score, bestMove, depth, alpha, beta, insert_time);
+    if (tte.typ == .CorruptErr) put(
+        b,
+        score,
+        bestMove,
+        depth,
+        lower_bound,
+        upper_bound,
+        insert_time,
+    );
 
     const time_diff = insert_time - @as(u12, @intCast(tte.entry.insert_time));
 
     const tte_val = @as(i12, @intCast(tte.entry.depth)) - @as(i12, @intCast(time_diff)) * 8;
     const our_val = @as(i12, depth);
 
-    if (our_val > tte_val) put(b, score, bestMove, depth, alpha, beta, insert_time);
+    if (our_val > tte_val) put(
+        b,
+        score,
+        bestMove,
+        depth,
+        lower_bound,
+        upper_bound,
+        insert_time,
+    );
 }

@@ -229,6 +229,32 @@ pub const Board = struct {
         return ret;
     }
 
+    pub fn applyNull(self: *Board) tp.Remove {
+        self.hash_in += 1;
+        self.hash[self.hash_in] = self.hash[self.hash_in - 1] ^ zbr.SideHash;
+        self.side = @enumFromInt(~@intFromEnum(self.side));
+
+        const pas = self.enPassant().lsb();
+        const move_rule = self.move_rule;
+
+        self.move_rule = 0;
+        self.pawns.v &= self.w_pieces.v | self.b_pieces.v; //Unsetting en passant
+        if (pas) |sq| self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(sq)];
+
+        return .{ .typ = null, .pas = pas, .cas = self.castle, .move_rule = move_rule };
+    }
+
+    pub fn removeNull(self: *Board, u: tp.Remove) void {
+        self.side = @enumFromInt(~@intFromEnum(self.side));
+        self.hash_in -= 1;
+
+        self.move_rule = u.move_rule;
+        self.castle = u.cas;
+        if (u.pas) |pas| {
+            self.pawns.v |= pas.toBoard().v; //Resetting en passant
+        }
+    }
+
     pub fn apply(self: *Board, m: tp.Move) tp.Remove {
         self.hash_in += 1;
         self.hash[self.hash_in] = self.hash[self.hash_in - 1] ^ zbr.SideHash;
@@ -239,6 +265,7 @@ pub const Board = struct {
         self.move_rule += 1;
 
         self.pawns.v &= self.w_pieces.v | self.b_pieces.v; //Unsetting en passant
+        if (pas) |sq| self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(sq)];
 
         if (self.pawns.check(m.from)) self.move_rule = 0;
 

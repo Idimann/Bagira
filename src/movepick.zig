@@ -30,6 +30,7 @@ pub fn bestMove(b: *bo.Board, time: i64, minimal: bool) !?Result {
         };
         pv = search.stack[0].pv;
         pv_size = search.stack[0].pv_size;
+        search.pv_exists = true;
         search.clearStack();
 
         if (!minimal) {

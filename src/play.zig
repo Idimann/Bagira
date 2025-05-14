@@ -11,7 +11,10 @@ pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
     }
 
     var list = std.ArrayList(tp.Move).init(alloc);
-    _ = try mv.gen(b, &list);
+
+    const maker = mv.Maker.init(b);
+    try maker.gen(&list, .Either);
+    try maker.gen(&list, .Castle);
 
     var ret: usize = 0;
     for (list.items) |mov| {
@@ -27,7 +30,10 @@ pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
 
 pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     var list = std.ArrayList(tp.Move).init(alloc);
-    _ = try mv.gen(b, &list);
+
+    const maker = mv.Maker.init(b);
+    try maker.gen(&list, .Either);
+    try maker.gen(&list, .Castle);
 
     var total: usize = 0;
     for (list.items) |mov| {
@@ -66,7 +72,6 @@ pub fn play(b: *bo.Board, player: bo.Side, time: i64, minimal: bool) !void {
             return;
         }
 
-        b.print();
         mv.printList(&list);
         var buf: [3]u8 = undefined;
         while (try stdin.readUntilDelimiterOrEof(buf[0..], '\n')) |user_input| {
@@ -83,10 +88,10 @@ pub fn play(b: *bo.Board, player: bo.Side, time: i64, minimal: bool) !void {
         // std.debug.print("Generating move\n", .{});
         if (try pi.bestMove(b, time, minimal)) |move| {
             _ = b.apply(move.move);
+            b.print();
             move.move.print();
             if (se.Searcher.isMate(move.eval)) {
-                var len = @divFloor(move.dep, 2);
-                if (@rem(move.dep, 2) == 0) len -= 1;
+                const len = @divFloor(move.dep + 1, 2);
                 std.debug.print(" => Mate in {}\n", .{len});
             } else std.debug.print(" => {} {}\n", .{ move.dep, move.eval });
         } else {
@@ -104,8 +109,7 @@ pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64, minimal: bool) !void {
         _ = b.apply(move.move);
         move.move.print();
         if (se.Searcher.isMate(move.eval)) {
-            var len = @divFloor(move.dep, 2);
-            if (@rem(move.dep, 2) == 0) len -= 1;
+            const len = @divFloor(move.dep + 1, 2);
             std.debug.print(" => Mate in {}\n", .{len});
         } else std.debug.print(" => {} {}\n", .{ move.dep, move.eval });
         b.print();
