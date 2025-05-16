@@ -215,7 +215,8 @@ pub const Maker = struct {
         list: *std.ArrayList(tp.Move),
         cap: MoveType,
     ) !void {
-        var iter = ta.KingAttacks[@intFromEnum(sq)].without(self.dat.our);
+        var iter = ta.KingAttacks[@intFromEnum(sq)]
+            .without(self.dat.our);
         if (cap == .Capture)
             iter.v &= self.dat.their.v
         else if (cap == .Quiet)
@@ -231,13 +232,12 @@ pub const Maker = struct {
         sq: tp.Square,
         mv: tp.Move,
     ) bool {
+        if (mv.from != sq) return false;
         var iter = ta.KingAttacks[@intFromEnum(sq)].without(self.dat.our);
+
         while (iter.popLsb()) |to| {
-            if (self.attack_count(to, self.dat.our_king) == 0 and
-                mv.equals(.{ .from = sq, .to = to, .typ = .Normal }))
-            {
+            if (self.attack_count(to, self.dat.our_king) == 0 and mv.to == to)
                 return true;
-            }
         }
 
         return false;
@@ -251,14 +251,15 @@ pub const Maker = struct {
         cap: MoveType,
     ) !void {
         if (p == .None) {
-            var iter = ta.KnightAttacks[@intFromEnum(sq)].without(self.dat.our);
+            var iter = ta.KnightAttacks[@intFromEnum(sq)]
+                .without(self.dat.our)
+                .op_and(self.al);
             if (cap == .Capture)
                 iter.v &= self.dat.their.v
             else if (cap == .Quiet)
                 iter = iter.without(self.dat.their);
             while (iter.popLsb()) |to| {
-                if (self.al.check(to))
-                    try list.append(.{ .from = sq, .to = to, .typ = .Normal });
+                try list.append(.{ .from = sq, .to = to, .typ = .Normal });
             }
         }
     }
@@ -269,16 +270,10 @@ pub const Maker = struct {
         p: PinState,
         mv: tp.Move,
     ) bool {
-        if (p == .None) {
-            var iter = ta.KnightAttacks[@intFromEnum(sq)].without(self.dat.our);
-            while (iter.popLsb()) |to| {
-                if (self.al.check(to) and
-                    mv.equals(.{ .from = sq, .to = to, .typ = .Normal }))
-                    return true;
-            }
-        }
+        if (mv.from != sq) return false;
 
-        return false;
+        const iter = ta.KnightAttacks[@intFromEnum(sq)].without(self.dat.our);
+        return p == .None and iter.op_and(self.al).op_and(mv.to.toBoard()).v != 0;
     }
 
     inline fn genLine(
@@ -289,7 +284,9 @@ pub const Maker = struct {
         cap: MoveType,
     ) !void {
         if (p != .Diag) {
-            var iter = ta.getLine(sq, self.dat.combi).without(self.dat.our);
+            var iter = ta.getLine(sq, self.dat.combi)
+                .without(self.dat.our)
+                .op_and(self.al);
             if (cap == .Capture)
                 iter.v &= self.dat.their.v
             else if (cap == .Quiet)
@@ -299,13 +296,11 @@ pub const Maker = struct {
                 while (iter.popLsb()) |to| {
                     if (rank_pin != (to.rank() == sq.rank())) continue;
 
-                    if (self.al.check(to))
-                        try list.append(.{ .from = sq, .to = to, .typ = .Normal });
+                    try list.append(.{ .from = sq, .to = to, .typ = .Normal });
                 }
             } else {
                 while (iter.popLsb()) |to| {
-                    if (self.al.check(to))
-                        try list.append(.{ .from = sq, .to = to, .typ = .Normal });
+                    try list.append(.{ .from = sq, .to = to, .typ = .Normal });
                 }
             }
         }
@@ -318,22 +313,19 @@ pub const Maker = struct {
         mv: tp.Move,
     ) bool {
         if (p != .Diag) {
-            var iter = ta.getLine(sq, self.dat.combi).without(self.dat.our);
+            var iter = ta.getLine(sq, self.dat.combi)
+                .without(self.dat.our)
+                .op_and(self.al);
             if (p == .Line) {
                 const rank_pin = if (sq.rank() == self.dat.our_king.rank()) true else false;
                 while (iter.popLsb()) |to| {
                     if (rank_pin != (to.rank() == sq.rank())) continue;
 
-                    if (self.al.check(to) and
-                        mv.equals(.{ .from = sq, .to = to, .typ = .Normal }))
-                        return true;
+                    if (mv.to == to) return true;
                 }
             } else {
                 while (iter.popLsb()) |to| {
-                    if (self.al.check(to))
-                        if (self.al.check(to) and
-                            mv.equals(.{ .from = sq, .to = to, .typ = .Normal }))
-                            return true;
+                    if (mv.to == to) return true;
                 }
             }
         }
@@ -349,7 +341,9 @@ pub const Maker = struct {
         cap: MoveType,
     ) !void {
         if (p != .Line) {
-            var iter = ta.getDiag(sq, self.dat.combi).without(self.dat.our);
+            var iter = ta.getDiag(sq, self.dat.combi)
+                .without(self.dat.our)
+                .op_and(self.al);
             if (cap == .Capture)
                 iter.v &= self.dat.their.v
             else if (cap == .Quiet)
@@ -362,13 +356,11 @@ pub const Maker = struct {
                 while (iter.popLsb()) |to| {
                     if (diag_pin != (to.diagonal() == sq.diagonal())) continue;
 
-                    if (self.al.check(to))
-                        try list.append(.{ .from = sq, .to = to, .typ = .Normal });
+                    try list.append(.{ .from = sq, .to = to, .typ = .Normal });
                 }
             } else {
                 while (iter.popLsb()) |to| {
-                    if (self.al.check(to))
-                        try list.append(.{ .from = sq, .to = to, .typ = .Normal });
+                    try list.append(.{ .from = sq, .to = to, .typ = .Normal });
                 }
             }
         }
@@ -381,7 +373,9 @@ pub const Maker = struct {
         mv: tp.Move,
     ) bool {
         if (p != .Line) {
-            var iter = ta.getDiag(sq, self.dat.combi).without(self.dat.our);
+            var iter = ta.getDiag(sq, self.dat.combi)
+                .without(self.dat.our)
+                .op_and(self.al);
             if (p == .Diag) {
                 const diag_pin = if (sq.diagonal() == self.dat.our_king.diagonal())
                     true
@@ -390,15 +384,11 @@ pub const Maker = struct {
                 while (iter.popLsb()) |to| {
                     if (diag_pin != (to.diagonal() == sq.diagonal())) continue;
 
-                    if (self.al.check(to) and
-                        mv.equals(.{ .from = sq, .to = to, .typ = .Normal }))
-                        return true;
+                    if (mv.to == to) return true;
                 }
             } else {
                 while (iter.popLsb()) |to| {
-                    if (self.al.check(to) and
-                        mv.equals(.{ .from = sq, .to = to, .typ = .Normal }))
-                        return true;
+                    if (mv.to == to) return true;
                 }
             }
         }

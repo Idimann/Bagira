@@ -250,9 +250,7 @@ pub const Board = struct {
 
         self.move_rule = u.move_rule;
         self.castle = u.cas;
-        if (u.pas) |pas| {
-            self.pawns.v |= pas.toBoard().v; //Resetting en passant
-        }
+        if (u.pas) |pas| self.pawns.v |= pas.toBoard().v; //Resetting en passant
     }
 
     pub fn apply(self: *Board, m: tp.Move) tp.Remove {

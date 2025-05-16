@@ -112,9 +112,9 @@ fn eval_queen(b: *const bo.Board, dat: *const mv.Data, sq: tp.Square, side: bo.S
 }
 
 const KingRank = [_]i32{ 10, 0, -20, -50, -130, -250, -260, -300 };
-const KingFile = [_]i32{ 15, 10, 0, -7, -5, 0, 10, 15 };
+const KingFile = [_]i32{ 25, 20, 10, -7, -5, 0, 20, 25 };
 const OpenMalus: i32 = -60;
-const CastleBonus: i32 = 27;
+const CastleBonus: i32 = 17;
 fn eval_king(b: *const bo.Board, dat: *const mv.Data, side: bo.Side) i32 {
     var ret: i32 = 0;
 

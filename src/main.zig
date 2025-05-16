@@ -7,7 +7,7 @@ const pl = @import("play.zig");
 const ev = @import("eval.zig");
 const mv = @import("movegen.zig");
 const zbr = @import("zobrist.zig");
-const pi = @import("movepick.zig");
+const po = @import("pool.zig");
 const se = @import("search.zig");
 
 pub fn main() !void {
@@ -16,8 +16,7 @@ pub fn main() !void {
     try zbr.init();
 
     var b = try bo.Board.fromFen(pos.start);
-
     std.debug.print("Static: {}\n", .{ev.eval(&b)});
 
-    try pl.play(&b, .White, 1500, false);
+    try pl.play(&b, .Black, 1000);
 }

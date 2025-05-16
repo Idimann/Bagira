@@ -86,9 +86,11 @@ pub inline fn store(
     lower_bound: i32,
     upper_bound: i32,
     bestMove: ?tp.Move,
-    insert_time: u6,
+    insert_time: u12,
     tte: TT_Result,
 ) void {
+    const real_insert_time = @as(i12, @intCast(insert_time % std.math.maxInt(u6)));
+
     if (tte.typ == .CorruptErr) put(
         b,
         score,
@@ -96,10 +98,14 @@ pub inline fn store(
         depth,
         lower_bound,
         upper_bound,
-        insert_time,
+        @intCast(real_insert_time),
     );
 
-    const time_diff = insert_time - @as(u12, @intCast(tte.entry.insert_time));
+    const real_tte_time = @as(i12, @intCast(tte.entry.insert_time));
+    const time_diff = if (real_insert_time < real_tte_time)
+        64
+    else
+        real_insert_time - real_tte_time;
 
     const tte_val = @as(i12, @intCast(tte.entry.depth)) - @as(i12, @intCast(time_diff)) * 8;
     const our_val = @as(i12, depth);
@@ -111,6 +117,6 @@ pub inline fn store(
         depth,
         lower_bound,
         upper_bound,
-        insert_time,
+        @intCast(real_insert_time),
     );
 }
