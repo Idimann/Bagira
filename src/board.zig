@@ -42,6 +42,10 @@ pub const Board = struct {
         return .{ .white = col, .typ = .Knight };
     }
 
+    pub inline fn isQuiet(self: *const Board, m: tp.Move) bool {
+        return !self.w_pieces.op_or(self.b_pieces).check(m.to);
+    }
+
     pub inline fn pieceType(self: *const Board, s: tp.Square) tp.PieceType {
         if (s == self.w_king or s == self.b_king) return .King;
         if (self.pawns.check(s)) return .Pawn;

@@ -15,19 +15,24 @@ pub const Thread = struct {
     board: bo.Board,
     search: se.Searcher,
 
+    iter: f32,
     stopped: bool,
     res: ?Result,
 };
 
-const PoolSize = 8;
+const PoolSize = 32;
 var Pool: [PoolSize]Thread = undefined;
 fn initPool(b: *const bo.Board) !void {
+    const float_size: f32 = @floatFromInt(PoolSize);
+    const max_iter = @min(2.5, float_size * 0.1);
+
     for (0..PoolSize) |i| {
         Pool[i].thread = null;
 
         Pool[i].board = b.*;
         Pool[i].search = try se.Searcher.init(&Pool[i], std.heap.c_allocator);
 
+        Pool[i].iter = 1 + (max_iter - 1) * (@as(f32, @floatFromInt(i)) / (float_size - 1));
         Pool[i].stopped = false;
         Pool[i].res = null;
     }
@@ -41,14 +46,12 @@ fn deinitPool() void {
 }
 
 fn start_search() !void {
-    const sleep_time = 50;
     for (0..PoolSize) |i| {
         Pool[i].thread = try std.Thread.spawn(
             .{},
             se.Searcher.iterDeepening,
             .{&Pool[i].search},
         );
-        std.time.sleep(sleep_time); // Sleep some time for larger diff between the threads
     }
 }
 
@@ -58,11 +61,17 @@ fn stop_search() void {
     }
 }
 
-pub fn bestMove(b: *const bo.Board, time: u64) !?Result {
+pub fn bestMove(b: *bo.Board, time: i64) !?Result {
+    const start = std.time.milliTimestamp();
     try initPool(b);
 
     try start_search();
-    std.time.sleep(std.time.ns_per_ms * time); // Time checking
+
+    // Time checking
+    while (true) {
+        if (std.time.milliTimestamp() - start >= time) break;
+    }
+
     stop_search();
 
     // TODO: Thread voting should be here

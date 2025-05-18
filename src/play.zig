@@ -54,7 +54,7 @@ pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     list.deinit();
 }
 
-pub fn play(b: *bo.Board, player: bo.Side, time: u64) !void {
+pub fn play(b: *bo.Board, player: bo.Side, time: i64) !void {
     if (b.side == player) {
         const stdin = std.io.getStdIn().reader();
         _ = try stdin.readByte();
@@ -111,7 +111,7 @@ pub fn play(b: *bo.Board, player: bo.Side, time: u64) !void {
     try play(b, player, time);
 }
 
-pub fn selfPlay(b: *bo.Board, time1: u64, time2: u64) !void {
+pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64) !void {
     if (try po.bestMove(b, if (b.side == .White) time1 else time2)) |move| {
         _ = b.apply(move.move);
         b.print();

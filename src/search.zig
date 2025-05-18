@@ -5,30 +5,8 @@ const mv = @import("movegen.zig");
 const ev = @import("eval.zig");
 const tt = @import("tt.zig");
 const po = @import("pool.zig");
-
-const MoveStage = enum {
-    // Hash move
-    TT,
-
-    // Good Captures
-    GenCaptures,
-    GoodCaptures,
-
-    // Killer move
-    Killer,
-
-    // Bad Captures
-    BadCaptures,
-
-    // Quiets
-    GenQuiets,
-    Quiets,
-
-    // For quiet search
-    QuietTT,
-    GenQuiet,
-    Quiet,
-};
+const pi = @import("movepick.zig");
+const hi = @import("history.zig");
 
 fn initReductions() [2][32][32]i12 {
     var ret = std.mem.zeroes([2][32][32]i12);
@@ -47,14 +25,14 @@ fn initReductions() [2][32][32]i12 {
 const Reductions = initReductions();
 
 const MaxDepth = 255;
-const MaxHistory = std.math.maxInt(i32);
 const History = struct {
     static: i32,
-    stage: MoveStage,
+    stage: ?pi.Stage,
     pv: [MaxDepth]tp.Move,
     pv_size: u8,
     killer: ?tp.Move,
     move: ?tp.Move,
+    hist_score: ?i32,
 };
 
 pub const Searcher = struct {
@@ -65,7 +43,7 @@ pub const Searcher = struct {
     pv_exists: bool,
     thread: *po.Thread,
 
-    history: [2][6][6][64]i32,
+    stats: hi.Stats,
 
     // The division by 2 is for overflow protection
     pub const MateVal = std.math.maxInt(i32) >> 1;
@@ -89,7 +67,7 @@ pub const Searcher = struct {
             .start_ply = thread.board.hash_in,
             .pv_exists = false,
             .thread = thread,
-            .history = std.mem.zeroes([2][6][6][64]i32),
+            .stats = hi.Stats.init(),
         };
     }
 
@@ -144,17 +122,6 @@ pub const Searcher = struct {
         self.stack[ply].pv[0] = move;
     }
 
-    inline fn historyBonus(depth: i12, original: i32) i32 {
-        const big: i32 = @intCast(depth);
-        const clamped = std.math.clamp(@as(i32, 25 + big * big), -MaxHistory, MaxHistory);
-        return clamped - @divFloor(original * @as(i32, @intCast(@abs(clamped))), MaxHistory);
-    }
-
-    inline fn updateHistory(depth: i12, moves: *[256]?*i32, num: u8) void {
-        moves[num].?.* += historyBonus(depth, moves[num].?.*);
-        for (0..num) |i| moves[i].?.* -= historyBonus(@max(0, depth - 2), moves[i].?.*);
-    }
-
     // This creates some small variance to avoid 3 fold blindness
     inline fn drawVal() i32 {
         return @as(i3, undefined);
@@ -167,156 +134,6 @@ pub const Searcher = struct {
     pub inline fn isMate(val: i32) bool {
         const mate = mateVal(std.math.maxInt(u12));
         return val <= mate or val >= -mate;
-    }
-
-    inline fn sort_moves(list: *std.ArrayList(tp.Move), score_list: *std.ArrayList(i32)) void {
-        if (list.items.len < 2) return;
-
-        for (0..(list.items.len / 2 + 1)) |i| {
-            for (0..(list.items.len - i - 1)) |j| {
-                if (score_list.items[j] < score_list.items[j + 1]) {
-                    const temp = list.items[j];
-                    const score_temp = score_list.items[j];
-                    list.items[j] = list.items[j + 1];
-                    score_list.items[j] = score_list.items[j + 1];
-                    list.items[j + 1] = temp;
-                    score_list.items[j + 1] = score_temp;
-                }
-            }
-        }
-
-        if (score_list.items[0] < score_list.items[1]) { //I know this is dumb
-            const temp = list.items[0];
-            const score_temp = score_list.items[0];
-            list.items[0] = list.items[1];
-            score_list.items[0] = score_list.items[0 + 1];
-            list.items[1] = temp;
-            score_list.items[1] = score_temp;
-        }
-    }
-
-    fn nextMove(
-        self: *Searcher,
-        gen: *const mv.Maker,
-        list: *std.ArrayList(tp.Move),
-        score_list: *std.ArrayList(i32),
-        tte: tt.TT_Result,
-    ) !?tp.Move {
-        const ply = self.b.hash_in - self.start_ply;
-
-        switch (self.stack[ply].stage) {
-            .TT => {
-                self.stack[ply].stage = .GenCaptures;
-                if (tte.typ == .Fine and
-                    tte.entry.typ != .Upper and
-                    gen.isLegal(tte.entry.move))
-                    return tte.entry.move;
-            },
-            .GenCaptures => {
-                try gen.gen(list, .Capture);
-                score_list.items.len = 0;
-                try score_list.ensureTotalCapacity(list.items.len);
-
-                const block = &self.history[@intFromEnum(gen.b.side)];
-                for (0..list.items.len) |i| {
-                    const index1 = gen.b.pieceType(list.items[i].from);
-                    const index2 = gen.b.pieceType(list.items[i].to);
-                    const index3 = @intFromEnum(list.items[i].to);
-
-                    const score = block.*[@intFromEnum(index1)][@intFromEnum(index2)][index3];
-                    score_list.appendAssumeCapacity(score);
-                }
-                sort_moves(list, score_list);
-
-                self.stack[ply].stage = .GoodCaptures;
-            },
-            .GoodCaptures => {
-                if (list.items.len == 0)
-                    self.stack[ply].stage = .Killer
-                else {
-                    const score = score_list.pop();
-                    if (score < 0) self.stack[ply].stage = .Killer;
-                    return list.pop();
-                }
-            },
-            .Killer => {
-                self.stack[ply].stage = .BadCaptures;
-                if (ply > 0) {
-                    if (self.stack[ply - 1].killer) |move| {
-                        if (gen.isLegal(move)) return move;
-                    }
-                }
-            },
-            .BadCaptures => {
-                if (list.items.len == 0)
-                    self.stack[ply].stage = .GenQuiets
-                else {
-                    _ = score_list.pop();
-                    return list.pop();
-                }
-            },
-            .GenQuiets => {
-                try gen.gen(list, .Quiet);
-                try gen.gen(list, .Castle);
-                score_list.items.len = 0;
-                try score_list.ensureTotalCapacity(list.items.len);
-
-                const block = &self.history[@intFromEnum(gen.b.side)];
-                for (0..list.items.len) |i| {
-                    const index1 = gen.b.pieceType(list.items[i].from);
-                    const index2 = 5;
-                    const index3 = @intFromEnum(list.items[i].to);
-
-                    const score = block.*[@intFromEnum(index1)][index2][index3];
-                    score_list.appendAssumeCapacity(score);
-                }
-                sort_moves(list, score_list);
-
-                self.stack[ply].stage = .Quiets;
-            },
-            .Quiets => {
-                _ = score_list.popOrNull();
-                return list.popOrNull();
-            },
-            .QuietTT => {
-                self.stack[ply].stage = .GenQuiet;
-                if (tte.typ == .Fine and
-                    tte.entry.typ != .Upper and
-                    gen.isLegal(tte.entry.move))
-                    return tte.entry.move;
-            },
-            .GenQuiet => {
-                if (gen.checks > 0)
-                    try gen.gen(list, .Either)
-                else
-                    try gen.gen(list, .Capture);
-                score_list.items.len = 0;
-                try score_list.ensureTotalCapacity(list.items.len);
-
-                const block = &self.history[@intFromEnum(gen.b.side)];
-                for (0..list.items.len) |i| {
-                    const index1 = gen.b.pieceType(list.items[i].from);
-                    var index2: u6 = 5;
-                    const index3 = @intFromEnum(list.items[i].to);
-                    if (gen.b.w_pieces.check(list.items[i].to) or
-                        gen.b.b_pieces.check(list.items[i].to))
-                    {
-                        index2 = @intFromEnum(gen.b.pieceType(list.items[i].to));
-                    }
-                    const score = block.*[@intFromEnum(index1)][index2][index3];
-                    score_list.appendAssumeCapacity(score);
-                }
-                sort_moves(list, score_list);
-
-                self.stack[ply].stage = .Quiet;
-            },
-            .Quiet => {
-                _ = score_list.popOrNull();
-                return list.popOrNull();
-            },
-        }
-
-        return self.nextMove(gen, list, score_list, tte);
     }
 
     pub fn quietSearch(self: *Searcher, a: i32, b: i32) !i32 {
@@ -342,22 +159,26 @@ pub const Searcher = struct {
 
         // TT Probe
         const tte = tt.probe(self.b);
+        const tte_fine = tte.reader != null and tte.usable;
 
         // Trust the tt entry if it's usable
         if (!pv and
-            tte.typ == .Fine and
-            tte.entry.usable(alpha, beta))
-            return tte.entry.score;
+            tte_fine and
+            tte.reader.?.usable(alpha, beta))
+            return tte.reader.?.val.score;
 
-        const eval = if (!inCheck) ev.eval(self.b) else -MateVal;
-        self.stack[ply].static = eval;
+        const static = ev.eval(self.b);
+        const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
+            tte.reader.?.val.score
+        else
+            static;
+        self.stack[ply].static = static;
+
         if (eval >= alpha) alpha = eval;
         if (alpha >= beta) return alpha;
 
-        var list = std.ArrayList(tp.Move).init(self.alloc);
-        defer list.deinit();
-        var score_list = std.ArrayList(i32).init(self.alloc);
-        defer score_list.deinit();
+        var pick = pi.Picker.init(.QuietTT, self, &gen, tte);
+        defer pick.deinit();
 
         const futility = eval + CentiPawn * 11;
 
@@ -371,8 +192,13 @@ pub const Searcher = struct {
         const lower_bound = alpha;
         const upper_bound = beta;
 
-        self.stack[ply].stage = .QuietTT;
-        while (try self.nextMove(&gen, &list, &score_list, tte)) |move| {
+        var stage = pick.stage;
+        while (try pick.nextMove()) |move| {
+            self.stack[ply].stage = stage;
+            self.stack[ply].hist_score = pick.current_hist;
+            self.stack[ply].move = move;
+
+            stage = pick.stage;
             foundMove = true;
 
             // Pruning, only if not in check
@@ -428,8 +254,9 @@ pub const Searcher = struct {
         return bestScore;
     }
 
-    pub fn search(self: *Searcher, a: i32, b: i32, depth: i12, cutnode: bool) !i32 {
+    pub fn search(self: *Searcher, a: i32, b: i32, dep: i12, cutnode: bool) !i32 {
         if (self.thread.stopped) return error.NoTime;
+        var depth = dep;
 
         const ply = self.b.hash_in - self.start_ply;
         if (depth == 0 or ply >= MaxDepth) return self.quietSearch(a, b);
@@ -453,25 +280,30 @@ pub const Searcher = struct {
 
         // TT Probe
         const tte = tt.probe(self.b);
+        const tte_fine = tte.reader != null and tte.usable;
 
         // Trust the tt entry if it's usable
         if (!root and
-            (!pv or (tte.entry.typ == .Exact)) and
-            tte.typ == .Fine and
-            tte.entry.depth >= depth and
-            tte.entry.usable(alpha, beta))
-            return tte.entry.score;
+            tte_fine and
+            (!pv or (tte.reader.?.val.typ == .Exact)) and
+            tte.reader.?.val.depth >= depth and
+            tte.reader.?.usable(alpha, beta))
+            return tte.reader.?.val.score;
 
         const static = ev.eval(self.b);
-        const eval = if (tte.typ == .Fine) tte.entry.score else static;
+        const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
+            tte.reader.?.val.score
+        else
+            static;
         self.stack[ply].static = static;
         const improving = !inCheck and
             (ply <= 1 or static > self.stack[ply - 2].static);
 
-        var list = std.ArrayList(tp.Move).init(self.alloc);
-        defer list.deinit();
-        var score_list = std.ArrayList(i32).init(self.alloc);
-        defer score_list.deinit();
+        // This is taken from Weiss (it says it's taken from Rebel there)
+        if (tte_fine and tte.reader.?.val.typ == .Upper) {
+            if (pv and depth >= 3) depth -= 1;
+            if (cutnode and depth >= 8) depth -= 1;
+        }
 
         // Pruning
         if (!inCheck and
@@ -480,7 +312,7 @@ pub const Searcher = struct {
             self.stack[ply - 1].move != null and
             !isMate(beta))
         {
-            if (depth < 7 and (tte.typ != .Fine or tte.entry.typ == .Upper)) {
+            if (depth < 7 and (!tte_fine or tte.reader.?.val.typ == .Upper)) {
                 const futility = beta + CentiPawn * 13 *
                     @divFloor(depth - @intFromBool(improving), 2);
                 const razor = if (isMate(alpha))
@@ -503,8 +335,11 @@ pub const Searcher = struct {
 
             // Null move pruning
             if (eval >= beta and eval >= static and cutnode and !isMate(beta)) {
-                const undo = self.b.applyNull();
+                self.stack[ply].stage = null;
+                self.stack[ply].hist_score = null;
                 self.stack[ply].move = null;
+
+                const undo = self.b.applyNull();
                 errdefer self.b.removeNull(undo);
 
                 const score = -try self.search(-beta, -beta + 1, null_depth, !cutnode);
@@ -519,10 +354,18 @@ pub const Searcher = struct {
                 (@intFromBool(!improving) + @divFloor(depth, 2));
             const probcut_beta = beta + probcut_add;
             if (depth >= 4 and eval >= probcut_beta) {
-                self.stack[ply].stage = .QuietTT;
-                while (try self.nextMove(&gen, &list, &score_list, tte)) |move| {
-                    const undo = self.b.apply(move);
+                var pick = pi.Picker.init(.QuietTT, self, &gen, tte);
+                defer pick.deinit();
+
+                var stage = pick.stage;
+                while (try pick.nextMove()) |move| {
+                    self.stack[ply].stage = stage;
+                    self.stack[ply].hist_score = pick.current_hist;
                     self.stack[ply].move = move;
+
+                    stage = pick.stage;
+
+                    const undo = self.b.apply(move);
                     errdefer self.b.remove(move, undo);
 
                     var score = -try self.quietSearch(-probcut_beta, -probcut_beta + 1);
@@ -542,16 +385,26 @@ pub const Searcher = struct {
                     else
                         score - probcut_add;
                 }
-
-                list.clearAndFree();
-                score_list.clearAndFree();
             }
         }
+
+        var pick = pi.Picker.init(.TT, self, &gen, tte);
+        defer pick.deinit();
+
+        const quiet_count = if (improving)
+            2 + depth * depth
+            else
+            @divFloor(depth * depth, 2);
+        const tt_capture = tte_fine and
+            tte.reader.?.val.typ != .Upper and
+            !self.b.isQuiet(tte.reader.?.val.move);
 
         var bestMove: ?tp.Move = null;
         var bestScore: i32 = -MateVal;
 
-        var histories = std.mem.zeroes([256]?*i32);
+        var histories = try std.ArrayList(tp.Move).initCapacity(self.alloc, 64);
+        defer histories.deinit();
+
         var move_counter: u8 = 0;
 
         // Removing killer move
@@ -560,11 +413,15 @@ pub const Searcher = struct {
         const lower_bound = alpha;
         const upper_bound = beta;
 
-        self.stack[ply].stage = .TT;
-        while (try self.nextMove(&gen, &list, &score_list, tte)) |move| {
-            const undo = self.b.apply(move);
+        var stage = pick.stage;
+        while (try pick.nextMove()) |move| {
+            self.stack[ply].stage = stage;
+            self.stack[ply].hist_score = pick.current_hist;
             self.stack[ply].move = move;
 
+            stage = pick.stage;
+
+            const undo = self.b.apply(move);
             errdefer self.b.remove(move, undo);
 
             var score: i32 = undefined;
@@ -586,16 +443,16 @@ pub const Searcher = struct {
                 const depth_index: u5 = @intCast(@min(31, depth));
                 const ply_index: u5 = @intCast(@min(31, ply));
                 R += Reductions[@intFromBool(quiet)][depth_index][ply_index];
+                if (pick.current_hist) |h|
+                    R -= @intCast(std.math.clamp(@divFloor(h, hi.CentiHist), -3, 1));
 
                 if (cutnode) R += 2;
 
-                const quiet_count = if (improving)
-                    2 + depth * depth
-                else
-                    @divFloor(depth * depth, 2);
                 if (quiet and
                     move_counter > quiet_count)
                     R += 2;
+
+                if (tt_capture) R += 1;
 
                 // Various pruning reduction criteria
                 if (pv) R -= 1;
@@ -624,23 +481,7 @@ pub const Searcher = struct {
 
             self.b.remove(move, undo);
 
-            // Updating history
-            const index1 = @intFromEnum(gen.b.pieceType(move.from));
-            const index3 = @intFromEnum(move.to);
-            if (self.b.side == .White) {
-                const index2 = if (self.b.b_pieces.check(move.to))
-                    5
-                else
-                    @intFromEnum(gen.b.pieceType(move.to));
-                histories[move_counter] = &self.history[0][index1][index2][index3];
-            } else {
-                const index2 = if (self.b.w_pieces.check(move.to))
-                    5
-                else
-                    @intFromEnum(gen.b.pieceType(move.to));
-                histories[move_counter] = &self.history[1][index1][index2][index3];
-            }
-
+            try histories.append(move);
             move_counter += 1;
             if (score > bestScore) {
                 bestScore = score;
@@ -655,7 +496,14 @@ pub const Searcher = struct {
                     }
 
                     if (score >= beta) {
-                        updateHistory(depth, &histories, move_counter - 1);
+                        self.stats.update(
+                            self.b,
+                            &histories,
+                            if (root) null else self.stack[ply - 1].move,
+                            depth,
+                            move_counter,
+                            @divFloor(score - eval, CentiPawn),
+                        );
                         if (ply > 0) self.stack[ply - 1].killer = move;
                         break;
                     }
@@ -703,14 +551,14 @@ pub const Searcher = struct {
     }
 
     pub fn iterDeepening(self: *Searcher) !void {
-        const iter: i12 = 1;
-
-        var depth: i12 = iter;
+        var depth: f32 = self.thread.iter;
         var score: i32 = 0;
         while (true) {
+            const se_depth: i12 = @intFromFloat(depth);
+
             // If we don't have a PV, we just do a standard search
             if (!self.pv_exists) {
-                score = self.search(-MateVal, MateVal, depth, false) catch |err| {
+                score = self.search(-MateVal, MateVal, se_depth, false) catch |err| {
                     switch (err) {
                         error.NoTime => break,
                         else => return err,
@@ -721,7 +569,7 @@ pub const Searcher = struct {
             }
 
             if (self.pv_exists) {
-                score = self.aspiration(score, depth) catch |err| {
+                score = self.aspiration(score, se_depth) catch |err| {
                     switch (err) {
                         error.NoTime => break,
                         else => return err,
@@ -734,12 +582,13 @@ pub const Searcher = struct {
                 self.thread.res = po.Result{
                     .move = self.stack[0].pv[0],
                     .score = score,
-                    .depth = depth,
+                    .depth = se_depth,
                 };
-                depth += iter;
+                depth += self.thread.iter;
             }
 
             self.clearStack();
+            if (isMate(score)) break;
         }
     }
 };
