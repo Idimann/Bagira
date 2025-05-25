@@ -68,17 +68,15 @@ pub const Maker = struct {
                         try list.append(move)
                     else if (self.al.check(next2.?))
                         try list.append(move2);
-                } else {
-                    if (self.al.check(next)) {
-                        if (next.rank() == prom_rank) {
-                            try list.appendSlice(&[_]tp.Move{
-                                .{ .from = sq, .to = next, .typ = .PromKnight },
-                                .{ .from = sq, .to = next, .typ = .PromBishop },
-                                .{ .from = sq, .to = next, .typ = .PromRook },
-                                .{ .from = sq, .to = next, .typ = .PromQueen },
-                            });
-                        } else try list.append(move);
-                    }
+                } else if (self.al.check(next)) {
+                    if (next.rank() == prom_rank) {
+                        try list.appendSlice(&[_]tp.Move{
+                            .{ .from = sq, .to = next, .typ = .PromKnight },
+                            .{ .from = sq, .to = next, .typ = .PromBishop },
+                            .{ .from = sq, .to = next, .typ = .PromRook },
+                            .{ .from = sq, .to = next, .typ = .PromQueen },
+                        });
+                    } else try list.append(move);
                 }
             }
         }
@@ -258,8 +256,9 @@ pub const Maker = struct {
                 iter.v &= self.dat.their.v
             else if (cap == .Quiet)
                 iter = iter.without(self.dat.their);
+            try list.ensureUnusedCapacity(iter.popcount());
             while (iter.popLsb()) |to| {
-                try list.append(.{ .from = sq, .to = to, .typ = .Normal });
+                list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
             }
         }
     }
@@ -533,11 +532,11 @@ pub const Maker = struct {
                     .None;
 
                 if (self.dat.our_king == sq)
-                    return self.checkKing(sq, mv)
+                    return mv.typ == .Normal and self.checkKing(sq, mv)
                 else if (self.checks < 2) {
                     if (self.b.pawns.check(sq))
                         return self.checkPawn(sq, pin_state, mv)
-                    else {
+                    else if (mv.typ == .Normal) {
                         const lin = self.b.lines.check(sq);
                         const dia = self.b.diags.check(sq);
 
@@ -545,7 +544,7 @@ pub const Maker = struct {
                             self.checkDiag(sq, pin_state, mv);
                         if (lin) return self.checkLine(sq, pin_state, mv);
                         if (dia) return self.checkDiag(sq, pin_state, mv);
-                        if (!lin and !dia) return self.checkKnight(sq, pin_state, mv);
+                        return self.checkKnight(sq, pin_state, mv);
                     }
                 }
             },

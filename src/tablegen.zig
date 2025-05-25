@@ -343,7 +343,7 @@ var LineShifts = std.mem.zeroes([64]usize);
 var LineMasks = std.mem.zeroes([64]tp.BitBoard);
 var LineAttacks = std.mem.zeroes([64][4096]tp.BitBoard);
 
-fn toFile(i: u64, f: tp.File) u64 {
+inline fn toFile(i: u64, f: tp.File) u64 {
     var ret: u64 = 0;
 
     var iter = tp.FileMask[@intFromEnum(f)];
@@ -357,7 +357,7 @@ fn toFile(i: u64, f: tp.File) u64 {
     return ret;
 }
 
-fn getLineAttacks(sq: tp.Square, block: tp.BitBoard) tp.BitBoard {
+inline fn getLineAttacks(sq: tp.Square, block: tp.BitBoard) tp.BitBoard {
     var ret: tp.BitBoard = .{ .v = 0 };
     const rank = @intFromEnum(sq.rank());
     const file = @intFromEnum(sq.file());
@@ -498,7 +498,7 @@ var DiagShifts = std.mem.zeroes([64]usize);
 var DiagMasks = std.mem.zeroes([64]tp.BitBoard);
 var DiagAttacks = std.mem.zeroes([64][4096]tp.BitBoard);
 
-fn toDiagonal(i: u64, d: u6) u64 {
+inline fn toDiagonal(i: u64, d: u6) u64 {
     var ret: u64 = 0;
 
     var iter = tp.DiagonalMask[d];
@@ -512,7 +512,7 @@ fn toDiagonal(i: u64, d: u6) u64 {
     return ret;
 }
 
-fn toAntiDiagonal(i: u64, d: u6) u64 {
+inline fn toAntiDiagonal(i: u64, d: u6) u64 {
     var ret: u64 = 0;
 
     var iter = tp.AntiDiagonalMask[d];
@@ -526,7 +526,7 @@ fn toAntiDiagonal(i: u64, d: u6) u64 {
     return ret;
 }
 
-fn getDiagAttacks(sq: tp.Square, block: tp.BitBoard) tp.BitBoard {
+inline fn getDiagAttacks(sq: tp.Square, block: tp.BitBoard) tp.BitBoard {
     var ret: tp.BitBoard = .{ .v = 0 };
     const rank = @intFromEnum(sq.rank());
     const file = @intFromEnum(sq.file());

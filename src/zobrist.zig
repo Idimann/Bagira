@@ -12,15 +12,15 @@ pub fn init() !void {
     });
     const rand = prng.random();
 
-    for (0..6) |i| {
-        for (0..64) |j| {
+    inline for (0..6) |i| {
+        inline for (0..64) |j| {
             ZobristTable[i][j] = rand.int(u64);
         }
     }
 
     SideHash = rand.int(u64);
 
-    for (0..4) |i| {
+    inline for (0..4) |i| {
         CastleTable[i] = rand.int(u64);
     }
 }

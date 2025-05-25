@@ -13,9 +13,7 @@ pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
     var list = std.ArrayList(tp.Move).init(alloc);
 
     const maker = mv.Maker.init(b);
-    // try maker.gen(&list, .Either);
-    try maker.gen(&list, .Capture);
-    try maker.gen(&list, .Quiet);
+    try maker.gen(&list, .Either);
     try maker.gen(&list, .Castle);
 
     var ret: usize = 0;
@@ -34,9 +32,7 @@ pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     var list = std.ArrayList(tp.Move).init(alloc);
 
     const maker = mv.Maker.init(b);
-    // try maker.gen(&list, .Either);
-    try maker.gen(&list, .Capture);
-    try maker.gen(&list, .Quiet);
+    try maker.gen(&list, .Either);
     try maker.gen(&list, .Castle);
 
     var total: usize = 0;
@@ -54,7 +50,7 @@ pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     list.deinit();
 }
 
-pub fn play(b: *bo.Board, player: bo.Side, time: i64) !void {
+pub fn play(b: *bo.Board, player: bo.Side, time: i64, minimal: bool) !void {
     if (b.side == player) {
         const stdin = std.io.getStdIn().reader();
         _ = try stdin.readByte();
@@ -89,15 +85,23 @@ pub fn play(b: *bo.Board, player: bo.Side, time: i64) !void {
             break;
         }
     } else {
-        // std.debug.print("Generating move\n", .{});
-        if (try po.bestMove(b, time)) |move| {
-            _ = b.apply(move.move);
-            b.print();
-            move.move.print();
-            if (se.Searcher.isMate(move.score)) {
-                const len = @divFloor(move.depth + 1, 2);
+        const best = try po.bestMove(b, time);
+        if (best.depth != 0) {
+            _ = b.apply(best.pv[0]);
+            if (!minimal) {
+                b.print();
+                for (0..@intCast(best.pv_size)) |i| {
+                    std.debug.print("\t=> ", .{});
+                    best.pv[i].print();
+                    std.debug.print("\n", .{});
+                }
+            }
+            best.pv[0].print();
+            std.debug.print("\n", .{});
+            if (se.Searcher.isMate(best.score)) {
+                const len = @divFloor(best.depth + 1, 2);
                 std.debug.print(" => Mate in {}\n", .{len});
-            } else std.debug.print(" => Depth: {}, Eval: {}\n", .{ move.depth, move.score });
+            } else std.debug.print(" => Depth: {}, Eval: {}\n", .{ best.depth, best.score });
         } else {
             const gen = mv.Maker.init(b);
             if (gen.checks > 0)
@@ -108,18 +112,27 @@ pub fn play(b: *bo.Board, player: bo.Side, time: i64) !void {
         }
     }
 
-    try play(b, player, time);
+    try play(b, player, time, minimal);
 }
 
-pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64) !void {
-    if (try po.bestMove(b, if (b.side == .White) time1 else time2)) |move| {
-        _ = b.apply(move.move);
-        b.print();
-        move.move.print();
-        if (se.Searcher.isMate(move.score)) {
-            const len = @divFloor(move.depth + 1, 2);
+pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64, minimal: bool) !void {
+    const best = try po.bestMove(b, if (b.side == .White) time1 else time2);
+    if (best.depth != 0) {
+        _ = b.apply(best.pv[0]);
+        if (!minimal) {
+            b.print();
+            for (0..@intCast(best.pv_size)) |i| {
+                std.debug.print("\t=> ", .{});
+                best.pv[i].print();
+                std.debug.print("\n", .{});
+            }
+        }
+        best.pv[0].print();
+        std.debug.print("\n", .{});
+        if (se.Searcher.isMate(best.score)) {
+            const len = @divFloor(best.depth + 1, 2);
             std.debug.print(" => Mate in {}\n", .{len});
-        } else std.debug.print(" => Depth: {}, Eval: {}\n", .{ move.depth, move.score });
+        } else std.debug.print(" => Depth: {}, Eval: {}\n", .{ best.depth, best.score });
     } else {
         const gen = mv.Maker.init(b);
         if (gen.checks > 0) {
@@ -132,5 +145,5 @@ pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64) !void {
         return;
     }
 
-    try selfPlay(b, time1, time2);
+    try selfPlay(b, time1, time2, minimal);
 }

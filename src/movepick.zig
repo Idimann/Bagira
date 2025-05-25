@@ -67,7 +67,7 @@ pub const Picker = struct {
     inline fn sort_moves(self: *Picker) void {
         if (self.list.items.len < 2) return;
 
-        for (0..(self.list.items.len / 2 + 1)) |i| {
+        for (0..(self.list.items.len - 1)) |i| {
             for (0..(self.list.items.len - i - 1)) |j| {
                 if (self.score_list.items[j] < self.score_list.items[j + 1]) {
                     const temp = self.list.items[j];
@@ -78,15 +78,6 @@ pub const Picker = struct {
                     self.score_list.items[j + 1] = score_temp;
                 }
             }
-        }
-
-        if (self.score_list.items[0] < self.score_list.items[1]) { //I know this is dumb
-            const temp = self.list.items[0];
-            const score_temp = self.score_list.items[0];
-            self.list.items[0] = self.list.items[1];
-            self.score_list.items[0] = self.score_list.items[0 + 1];
-            self.list.items[1] = temp;
-            self.score_list.items[1] = score_temp;
         }
     }
 

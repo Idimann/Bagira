@@ -8,12 +8,14 @@ pub const TT_Type = enum(u2) {
     Exact,
 };
 
+const HashMask = 0xFFFFFFFF;
 pub const TT_Entry = struct {
     check: u64,
-    hash: u64,
     // All of these combined are 64 bits
     val: packed struct {
+        hash: u32,
         score: i32,
+        eval: i32,
         move: tp.Move,
         depth: u8, //This is a u8 to allow for more room for insert_time
         typ: TT_Type,
@@ -21,7 +23,9 @@ pub const TT_Entry = struct {
     },
 
     pub inline fn getCheck(self: *const TT_Entry) u64 {
-        return self.hash ^ @as(*u64, @ptrCast(@constCast(&self.val))).*;
+        const arr: [*]const u64 = @ptrCast(&self.val);
+
+        return arr[0] ^ arr[1];
     }
 
     pub inline fn valid(self: *const TT_Entry) bool {
@@ -50,7 +54,7 @@ pub inline fn probe(b: *const bo.Board) TT_Result {
         .reader = null,
         .usable = false,
     };
-    if (b.hash[b.hash_in] != read.hash) return .{
+    if (@as(u32, @intCast(b.hash[b.hash_in] & HashMask)) != read.val.hash) return .{
         .reader = read,
         .usable = false,
     };
@@ -64,6 +68,7 @@ pub inline fn probe(b: *const bo.Board) TT_Result {
 inline fn put(
     b: *const bo.Board,
     score: i32,
+    eval: i32,
     move: ?tp.Move,
     depth: i12,
     lower_bound: i32,
@@ -73,11 +78,12 @@ inline fn put(
     const index = b.hash[b.hash_in] % TT_Size;
     var entry = TT_Entry{
         .check = 0,
-        .hash = b.hash[b.hash_in],
         .val = .{
+            .hash = @intCast(b.hash[b.hash_in] & HashMask),
             .score = std.math.clamp(score, lower_bound, upper_bound),
+            .eval = eval,
             .move = if (move) |mov| mov else std.mem.zeroes(tp.Move),
-            .depth = @intCast(depth),
+            .depth = @intCast(@min(depth, std.math.maxInt(u8))),
             .typ = if (score >= upper_bound)
                 .Lower
             else if (score <= lower_bound)
@@ -94,6 +100,7 @@ inline fn put(
 pub inline fn store(
     b: *const bo.Board,
     score: i32,
+    eval: i32,
     depth: i12,
     lower_bound: i32,
     upper_bound: i32,
@@ -107,6 +114,7 @@ pub inline fn store(
         put(
             b,
             score,
+            eval,
             bestMove,
             depth,
             lower_bound,
@@ -129,6 +137,7 @@ pub inline fn store(
     if (our_val > tte_val) put(
         b,
         score,
+        eval,
         bestMove,
         depth,
         lower_bound,

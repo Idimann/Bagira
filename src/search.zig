@@ -24,7 +24,7 @@ fn initReductions() [2][32][32]i12 {
 }
 const Reductions = initReductions();
 
-const MaxDepth = 255;
+pub const MaxDepth = 255;
 const History = struct {
     static: i32,
     stage: ?pi.Stage,
@@ -47,7 +47,7 @@ pub const Searcher = struct {
 
     // The division by 2 is for overflow protection
     pub const MateVal = std.math.maxInt(i32) >> 1;
-    const CentiPawn: i32 = @divExact(ev.PawnBase, 10);
+    pub const CentiPawn: i32 = @divExact(ev.PawnBase, 10);
     const PieceValue = [_]i32{
         ev.PawnBase,
         ev.KnightBase,
@@ -58,7 +58,7 @@ pub const Searcher = struct {
 
     pub fn init(thread: *po.Thread, alloc: std.mem.Allocator) !Searcher {
         const stack = try alloc.alloc(History, MaxDepth);
-        for (0..MaxDepth) |i| stack[i] = std.mem.zeroes(History);
+        inline for (0..MaxDepth) |i| stack[i] = std.mem.zeroes(History);
 
         return .{
             .alloc = alloc,
@@ -76,7 +76,7 @@ pub const Searcher = struct {
     }
 
     pub inline fn clearStack(self: *Searcher) void {
-        for (0..MaxDepth) |i| self.stack[i] = std.mem.zeroes(History);
+        inline for (0..MaxDepth) |i| self.stack[i] = std.mem.zeroes(History);
     }
 
     inline fn historyDraw(self: *const Searcher) bool {
@@ -167,7 +167,7 @@ pub const Searcher = struct {
             tte.reader.?.usable(alpha, beta))
             return tte.reader.?.val.score;
 
-        const static = ev.eval(self.b);
+        const static = if (tte_fine) tte.reader.?.val.eval else ev.eval(self.b);
         const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
             tte.reader.?.val.score
         else
@@ -212,11 +212,7 @@ pub const Searcher = struct {
             }
 
             const undo = self.b.apply(move);
-            self.stack[ply].move = move;
-            errdefer self.b.remove(move, undo);
-
             const score = -try self.quietSearch(-beta, -alpha);
-
             self.b.remove(move, undo);
 
             if (score > bestScore) {
@@ -243,6 +239,7 @@ pub const Searcher = struct {
         tt.store(
             self.b,
             bestScore,
+            static,
             0,
             lower_bound,
             upper_bound,
@@ -281,6 +278,7 @@ pub const Searcher = struct {
         // TT Probe
         const tte = tt.probe(self.b);
         const tte_fine = tte.reader != null and tte.usable;
+        const tte_move = tte_fine and tte.reader.?.val.typ != .Upper;
 
         // Trust the tt entry if it's usable
         if (!root and
@@ -290,7 +288,7 @@ pub const Searcher = struct {
             tte.reader.?.usable(alpha, beta))
             return tte.reader.?.val.score;
 
-        const static = ev.eval(self.b);
+        const static = if (tte_fine) tte.reader.?.val.eval else ev.eval(self.b);
         const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
             tte.reader.?.val.score
         else
@@ -300,7 +298,7 @@ pub const Searcher = struct {
             (ply <= 1 or static > self.stack[ply - 2].static);
 
         // This is taken from Weiss (it says it's taken from Rebel there)
-        if (tte_fine and tte.reader.?.val.typ == .Upper) {
+        if (!tte_move) {
             if (pv and depth >= 3) depth -= 1;
             if (cutnode and depth >= 8) depth -= 1;
         }
@@ -312,7 +310,7 @@ pub const Searcher = struct {
             self.stack[ply - 1].move != null and
             !isMate(beta))
         {
-            if (depth < 7 and (!tte_fine or tte.reader.?.val.typ == .Upper)) {
+            if (!tte_move) {
                 const futility = beta + CentiPawn * 13 *
                     @divFloor(depth - @intFromBool(improving), 2);
                 const razor = if (isMate(alpha))
@@ -331,19 +329,16 @@ pub const Searcher = struct {
             }
 
             const R: i12 = 4 + @divFloor(depth, 4);
-            const null_depth = if (R > depth) 0 else depth - R;
+            const null_depth = if (R >= depth) 0 else depth - R;
 
             // Null move pruning
-            if (eval >= beta and eval >= static and cutnode and !isMate(beta)) {
+            if (eval >= beta and eval >= static and cutnode) {
                 self.stack[ply].stage = null;
                 self.stack[ply].hist_score = null;
                 self.stack[ply].move = null;
 
                 const undo = self.b.applyNull();
-                errdefer self.b.removeNull(undo);
-
                 const score = -try self.search(-beta, -beta + 1, null_depth, !cutnode);
-
                 self.b.removeNull(undo);
 
                 if (score >= beta) return if (isMate(score)) beta else score;
@@ -362,14 +357,10 @@ pub const Searcher = struct {
                     self.stack[ply].stage = stage;
                     self.stack[ply].hist_score = pick.current_hist;
                     self.stack[ply].move = move;
-
                     stage = pick.stage;
 
                     const undo = self.b.apply(move);
-                    errdefer self.b.remove(move, undo);
-
                     var score = -try self.quietSearch(-probcut_beta, -probcut_beta + 1);
-
                     self.b.remove(move, undo);
 
                     if (score >= probcut_beta)
@@ -391,13 +382,12 @@ pub const Searcher = struct {
         var pick = pi.Picker.init(.TT, self, &gen, tte);
         defer pick.deinit();
 
+        const depth_sq = @as(i32, @intCast(depth)) * @as(i32, @intCast(depth));
         const quiet_count = if (improving)
-            2 + depth * depth
-            else
-            @divFloor(depth * depth, 2);
-        const tt_capture = tte_fine and
-            tte.reader.?.val.typ != .Upper and
-            !self.b.isQuiet(tte.reader.?.val.move);
+            2 + depth_sq
+        else
+            @divFloor(depth_sq, 2);
+        const tt_capture = tte_move and !self.b.isQuiet(tte.reader.?.val.move);
 
         var bestMove: ?tp.Move = null;
         var bestScore: i32 = -MateVal;
@@ -418,11 +408,9 @@ pub const Searcher = struct {
             self.stack[ply].stage = stage;
             self.stack[ply].hist_score = pick.current_hist;
             self.stack[ply].move = move;
-
             stage = pick.stage;
 
             const undo = self.b.apply(move);
-            errdefer self.b.remove(move, undo);
 
             var score: i32 = undefined;
             var next_depth = depth - 1;
@@ -444,7 +432,7 @@ pub const Searcher = struct {
                 const ply_index: u5 = @intCast(@min(31, ply));
                 R += Reductions[@intFromBool(quiet)][depth_index][ply_index];
                 if (pick.current_hist) |h|
-                    R -= @intCast(std.math.clamp(@divFloor(h, hi.CentiHist), -3, 1));
+                    R -= @intCast(std.math.clamp(@divFloor(h, hi.CentiHist), -2, 2));
 
                 if (cutnode) R += 2;
 
@@ -465,14 +453,8 @@ pub const Searcher = struct {
 
                 score = -try self.search(-alpha - 1, -alpha, r_depth, true);
 
-                if (score > alpha and r_depth < next_depth) {
-                    const re_depth = if (R == 1 or score > bestScore - CentiPawn * 10)
-                        next_depth
-                    else
-                        next_depth - 1;
-
-                    score = -try self.search(-alpha - 1, -alpha, re_depth, !cutnode);
-                }
+                if (score > alpha and r_depth < next_depth)
+                    score = -try self.search(-alpha - 1, -alpha, next_depth, !cutnode);
             } else if (!pv or move_counter > 0)
                 score = -try self.search(-alpha - 1, -alpha, next_depth, !cutnode);
 
@@ -518,6 +500,7 @@ pub const Searcher = struct {
         tt.store(
             self.b,
             bestScore,
+            static,
             depth,
             lower_bound,
             upper_bound,
@@ -547,6 +530,7 @@ pub const Searcher = struct {
             } else return score;
 
             delta += @divFloor(delta, 3);
+            if (delta > MateVal) delta = MateVal;
         }
     }
 
@@ -554,7 +538,7 @@ pub const Searcher = struct {
         var depth: f32 = self.thread.iter;
         var score: i32 = 0;
         while (true) {
-            const se_depth: i12 = @intFromFloat(depth);
+            const se_depth: i12 = @intFromFloat(depth + 0.5);
 
             // If we don't have a PV, we just do a standard search
             if (!self.pv_exists) {
@@ -580,7 +564,8 @@ pub const Searcher = struct {
             // Update the threads result
             if (self.pv_exists) {
                 self.thread.res = po.Result{
-                    .move = self.stack[0].pv[0],
+                    .pv = self.stack[0].pv,
+                    .pv_size = self.stack[0].pv_size,
                     .score = score,
                     .depth = se_depth,
                 };

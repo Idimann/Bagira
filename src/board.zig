@@ -2,7 +2,14 @@ const std = @import("std");
 const tp = @import("types.zig");
 const zbr = @import("zobrist.zig");
 
-pub const Side = enum(u1) { White, Black };
+pub const Side = enum(u1) {
+    White,
+    Black,
+
+    pub inline fn other(self: *Side) void {
+        self.* = @enumFromInt(~@intFromEnum(self.*));
+    }
+};
 pub const Board = struct {
     w_pieces: tp.BitBoard,
     b_pieces: tp.BitBoard,
@@ -18,6 +25,24 @@ pub const Board = struct {
     hash: [2048]u64,
     hash_in: u12,
     move_rule: u8, //This is given in plies, not moves
+
+    pub inline fn equal(self: *const Board, other: *const Board) bool {
+        if (self.hash_in != other.hash_in) return false;
+        for (0..self.hash_in) |i| {
+            if (self.hash[i] != other.hash[i]) return false;
+        }
+
+        return self.w_pieces.v == other.w_pieces.v and
+            self.b_pieces.v == other.b_pieces.v and
+            self.pawns.v == other.pawns.v and
+            self.diags.v == other.diags.v and
+            self.lines.v == other.lines.v and
+            self.w_king == other.w_king and
+            self.b_king == other.b_king and
+            std.meta.eql(self.castle, other.castle) and
+            self.side == other.side and
+            self.move_rule == other.move_rule;
+    }
 
     pub fn check(b: *const Board, s: tp.Square) ?struct { white: bool, typ: tp.PieceType } {
         const col =
@@ -236,7 +261,6 @@ pub const Board = struct {
     pub fn applyNull(self: *Board) tp.Remove {
         self.hash_in += 1;
         self.hash[self.hash_in] = self.hash[self.hash_in - 1] ^ zbr.SideHash;
-        self.side = @enumFromInt(~@intFromEnum(self.side));
 
         const pas = self.enPassant().lsb();
         const move_rule = self.move_rule;
@@ -244,13 +268,14 @@ pub const Board = struct {
         self.move_rule = 0;
         self.pawns.v &= self.w_pieces.v | self.b_pieces.v; //Unsetting en passant
         if (pas) |sq| self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(sq)];
+        self.side.other();
 
         return .{ .typ = null, .pas = pas, .cas = self.castle, .move_rule = move_rule };
     }
 
     pub fn removeNull(self: *Board, u: tp.Remove) void {
-        self.side = @enumFromInt(~@intFromEnum(self.side));
         self.hash_in -= 1;
+        self.side.other();
 
         self.move_rule = u.move_rule;
         self.castle = u.cas;
@@ -596,14 +621,14 @@ pub const Board = struct {
         if (cas.bk != self.castle.bk) self.hash[self.hash_in] ^= zbr.CastleTable[2];
         if (cas.bq != self.castle.bq) self.hash[self.hash_in] ^= zbr.CastleTable[3];
 
-        self.side = @enumFromInt(~@intFromEnum(self.side));
+        self.side.other();
         return .{ .typ = ret, .pas = pas, .cas = cas, .move_rule = move_rule };
     }
 
     pub fn remove(self: *Board, m: tp.Move, u: tp.Remove) void {
         self.hash_in -= 1;
 
-        self.side = @enumFromInt(~@intFromEnum(self.side));
+        self.side.other();
         self.pawns.v &= self.w_pieces.v | self.b_pieces.v; //Unsetting old en passant
 
         switch (m.typ) {
@@ -754,5 +779,25 @@ pub const Board = struct {
                 if (j == 7) std.debug.print("\n", .{}) else std.debug.print(" ", .{});
             }
         }
+    }
+
+    pub fn print_detailed(b: *const Board) void {
+        b.print();
+        std.debug.print("White\n", .{});
+        b.w_pieces.print();
+        std.debug.print("Black\n", .{});
+        b.b_pieces.print();
+        std.debug.print("Pawns\n", .{});
+        b.pawns.print();
+        std.debug.print("Lines\n", .{});
+        b.lines.print();
+        std.debug.print("Diags\n", .{});
+        b.diags.print();
+        std.debug.print("Kings\n", .{});
+        b.w_king.toBoard().op_or(b.b_king.toBoard()).print();
+        std.debug.print(
+            "Move Rule: {}, Hash: {}, Hash Index: {}\n",
+            .{ b.move_rule, b.hash[b.hash_in], b.hash_in },
+        );
     }
 };
