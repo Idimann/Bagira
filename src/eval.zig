@@ -8,6 +8,7 @@ pub const PawnBase = 100;
 const PawnRank = [_]i32{ 0, 0, -4, 8, 10, 11, 17, 0 };
 const PawnFile = [_]i32{ 2, 0, 1, 4, 4, 1, 0, 2 };
 const PawnHold = 3;
+const PawnControlFile = [_]i32{ 1, 0, 3, 4, 4, 3, 0, 1 };
 fn eval_pawn(b: *const bo.Board, dat: *const mv.Data, sq: tp.Square, side: bo.Side) i32 {
     _ = b;
     var ret: i32 = PawnBase;
@@ -18,12 +19,22 @@ fn eval_pawn(b: *const bo.Board, dat: *const mv.Data, sq: tp.Square, side: bo.Si
         @enumFromInt(7 - @intFromEnum(sq.rank()));
     const file = sq.file();
     ret += PawnRank[@intFromEnum(rank)] + PawnFile[@intFromEnum(file)];
-    const iter = (if (side == .White)
+
+    var iter = if (side == .White)
         ta.PawnAttacksWhite[@intFromEnum(sq)]
     else
-        ta.PawnAttacksBlack[@intFromEnum(sq)]).op_and(dat.their);
+        ta.PawnAttacksBlack[@intFromEnum(sq)];
+    while (iter.popLsb()) |s| {
+        const s_file = @intFromEnum(s.file());
+        const control = if (side == .White)
+            @intFromEnum(s.rank()) >= 3
+        else
+            @intFromEnum(s.rank()) <= 4;
 
-    ret += PawnHold * @as(i32, @intCast(iter.popcount()));
+        if (control) ret += PawnControlFile[s_file];
+        if (dat.our.check(s)) ret += PawnHold;
+    }
+
     return ret;
 }
 
@@ -112,9 +123,9 @@ fn eval_queen(b: *const bo.Board, dat: *const mv.Data, sq: tp.Square, side: bo.S
 }
 
 const KingRank = [_]i32{ 10, 0, -20, -50, -130, -250, -260, -300 };
-const KingFile = [_]i32{ 25, 20, 10, -7, -5, 0, 20, 25 };
+const KingFile = [_]i32{ 30, 25, 15, -10, -5, 5, 25, 30 };
 const OpenMalus: i32 = -60;
-const CastleBonus: i32 = 17;
+const CastleBonus: i32 = 8;
 fn eval_king(b: *const bo.Board, dat: *const mv.Data, side: bo.Side) i32 {
     var ret: i32 = 0;
 
@@ -141,6 +152,7 @@ fn eval_king(b: *const bo.Board, dat: *const mv.Data, side: bo.Side) i32 {
     return ret;
 }
 
+const TempBonus = 8;
 fn eval_part(b: *const bo.Board, side: bo.Side) i32 {
     const dat: mv.Data = .{
         .combi = b.w_pieces.op_or(b.b_pieces),
@@ -148,7 +160,10 @@ fn eval_part(b: *const bo.Board, side: bo.Side) i32 {
         .their = if (side == .White) b.b_pieces else b.w_pieces,
         .our_king = if (side == .White) b.w_king else b.b_king,
     };
+
     var ret: i32 = eval_king(b, &dat, side);
+    if (b.side == side) ret += TempBonus;
+
     var iter = dat.our;
     while (iter.popLsb()) |sq| {
         if (b.diags.check(sq)) {
@@ -167,8 +182,17 @@ fn eval_part(b: *const bo.Board, side: bo.Side) i32 {
     return ret;
 }
 
-pub fn eval(b: *bo.Board) i32 {
+pub fn eval(b: *const bo.Board) i32 {
     const white = eval_part(b, .White);
     const black = eval_part(b, .Black);
     return if (b.side == .White) white - black else black - white;
+}
+
+pub inline fn adjust(input: i32, b: *const bo.Board) i32 {
+    var ret = input;
+
+    const move_rule_adjust: f32 = (150 - @as(f32, @floatFromInt(b.move_rule))) / 150;
+    ret *= @intFromFloat(1 + move_rule_adjust);
+
+    return ret;
 }

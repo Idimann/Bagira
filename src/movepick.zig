@@ -64,7 +64,7 @@ pub const Picker = struct {
         self.score_list.deinit();
     }
 
-    inline fn sort_moves(self: *Picker) void {
+    inline fn sortMoves(self: *Picker) void {
         if (self.list.items.len < 2) return;
 
         for (0..(self.list.items.len - 1)) |i| {
@@ -112,7 +112,7 @@ pub const Picker = struct {
                     );
                     self.score_list.appendAssumeCapacity(score);
                 }
-                self.sort_moves();
+                self.sortMoves();
 
                 self.stage = .GoodCaptures;
             },
@@ -169,7 +169,7 @@ pub const Picker = struct {
                     );
                     self.score_list.appendAssumeCapacity(score);
                 }
-                self.sort_moves();
+                self.sortMoves();
 
                 self.stage = .Quiets;
             },
@@ -212,7 +212,7 @@ pub const Picker = struct {
                     );
                     self.score_list.appendAssumeCapacity(score);
                 }
-                self.sort_moves();
+                self.sortMoves();
 
                 self.stage = .Quiet;
             },

@@ -11,7 +11,7 @@ pub const TT_Type = enum(u2) {
 const HashMask = 0xFFFFFFFF;
 pub const TT_Entry = struct {
     check: u64,
-    // All of these combined are 64 bits
+    // All of these combined are 128 bits
     val: packed struct {
         hash: u32,
         score: i32,

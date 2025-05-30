@@ -131,6 +131,17 @@ pub const Searcher = struct {
         return -MateVal + @as(i32, ply);
     }
 
+    inline fn adjustEval(self: *const Searcher, input: i32) i32 {
+        var ret = input;
+
+        if (self.b.move_rule > 8) {
+            const move_rule: f32 = (150 - @as(f32, @floatFromInt(self.b.move_rule))) / 150;
+            ret *= @intFromFloat(1 + move_rule);
+        }
+
+        return std.math.clamp(ret, -MateVal + 1, MateVal - 1);
+    }
+
     pub inline fn isMate(val: i32) bool {
         const mate = mateVal(std.math.maxInt(u12));
         return val <= mate or val >= -mate;
@@ -167,7 +178,9 @@ pub const Searcher = struct {
             tte.reader.?.usable(alpha, beta))
             return tte.reader.?.val.score;
 
-        const static = if (tte_fine) tte.reader.?.val.eval else ev.eval(self.b);
+        var static = if (tte_fine) tte.reader.?.val.eval else ev.eval(self.b);
+        static = self.adjustEval(static);
+
         const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
             tte.reader.?.val.score
         else
@@ -254,6 +267,8 @@ pub const Searcher = struct {
     pub fn search(self: *Searcher, a: i32, b: i32, dep: i12, cutnode: bool) !i32 {
         if (self.thread.stopped) return error.NoTime;
         var depth = dep;
+        const our_plies = @divFloor(depth + 1, 2);
+        const their_plies = @divFloor(depth, 2);
 
         const ply = self.b.hash_in - self.start_ply;
         if (depth == 0 or ply >= MaxDepth) return self.quietSearch(a, b);
@@ -288,7 +303,9 @@ pub const Searcher = struct {
             tte.reader.?.usable(alpha, beta))
             return tte.reader.?.val.score;
 
-        const static = if (tte_fine) tte.reader.?.val.eval else ev.eval(self.b);
+        var static = if (tte_fine) tte.reader.?.val.eval else ev.eval(self.b);
+        static = self.adjustEval(static);
+
         const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
             tte.reader.?.val.score
         else
@@ -310,22 +327,26 @@ pub const Searcher = struct {
             self.stack[ply - 1].move != null and
             !isMate(beta))
         {
-            if (!tte_move) {
-                const futility = beta + CentiPawn * 13 *
-                    @divFloor(depth - @intFromBool(improving), 2);
-                const razor = if (isMate(alpha))
-                    alpha
-                else
-                    alpha - CentiPawn * 11 * depth * depth;
+            const futility = beta + CentiPawn *
+                6 *
+                their_plies *
+                (2 - @as(u3, @intFromBool(cutnode)));
+            const razor = if (isMate(alpha))
+                alpha
+            else
+                alpha - CentiPawn *
+                    (15 +
+                    6 *
+                    our_plies *
+                    (1 + @as(u3, @intFromBool(improving))));
 
-                // Reverse futility pruning
-                if (eval >= futility) return eval;
+            // Reverse futility pruning
+            if (eval >= futility) return eval;
 
-                // Razoring
-                if (!improving and eval < razor) {
-                    const score = try self.quietSearch(-alpha - 1, -alpha);
-                    if (score < alpha) return if (isMate(score)) alpha else score;
-                }
+            // Razoring
+            if (!tte_move and !improving and eval < razor) {
+                const score = try self.quietSearch(-alpha - 1, -alpha);
+                if (score < alpha) return if (isMate(score)) alpha else score;
             }
 
             const R: i12 = 4 + @divFloor(depth, 4);
@@ -345,8 +366,7 @@ pub const Searcher = struct {
             }
 
             // Prob cut
-            const probcut_add = CentiPawn * 12 *
-                (@intFromBool(!improving) + @divFloor(depth, 2));
+            const probcut_add = CentiPawn * 8 - @intFromBool(!improving);
             const probcut_beta = beta + probcut_add;
             if (depth >= 4 and eval >= probcut_beta) {
                 var pick = pi.Picker.init(.QuietTT, self, &gen, tte);
@@ -382,11 +402,6 @@ pub const Searcher = struct {
         var pick = pi.Picker.init(.TT, self, &gen, tte);
         defer pick.deinit();
 
-        const depth_sq = @as(i32, @intCast(depth)) * @as(i32, @intCast(depth));
-        const quiet_count = if (improving)
-            2 + depth_sq
-        else
-            @divFloor(depth_sq, 2);
         const tt_capture = tte_move and !self.b.isQuiet(tte.reader.?.val.move);
 
         var bestMove: ?tp.Move = null;
@@ -435,17 +450,13 @@ pub const Searcher = struct {
                     R -= @intCast(std.math.clamp(@divFloor(h, hi.CentiHist), -2, 2));
 
                 if (cutnode) R += 2;
-
-                if (quiet and
-                    move_counter > quiet_count)
-                    R += 2;
-
+                if (tte_fine and tte.reader.?.val.typ == .Exact) R += 1;
                 if (tt_capture) R += 1;
 
                 // Various pruning reduction criteria
                 if (pv) R -= 1;
                 if (inCheck) R -= 1;
-                if (self.stack[ply].stage == .Killer) R -= 1;
+                // if (self.stack[ply].stage == .Killer) R -= 1;
                 if (improving) R -= 1;
 
                 if (R < 0) R = 0;
