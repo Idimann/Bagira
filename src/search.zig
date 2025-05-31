@@ -2,82 +2,39 @@ const std = @import("std");
 const tp = @import("types.zig");
 const bo = @import("board.zig");
 const mv = @import("movegen.zig");
-const ev = @import("eval.zig");
-const tt = @import("tt.zig");
 const po = @import("pool.zig");
 const pi = @import("movepick.zig");
 const hi = @import("history.zig");
+const tt = @import("tt.zig");
 
-fn initReductions() [2][32][32]i12 {
-    var ret = std.mem.zeroes([2][32][32]i12);
-
-    for (1..32) |i| {
-        for (1..32) |j| {
-            const log = @log(@as(f64, @floatFromInt(i))) * @log(@as(f64, @floatFromInt(j)));
-
-            ret[0][i][j] = @intFromFloat(0.38 + log / 3.76);
-            ret[1][i][j] = @intFromFloat(2.01 + log / 2.32);
-        }
-    }
-
-    return ret;
-}
-const Reductions = initReductions();
-
-pub const MaxDepth = 255;
-const History = struct {
-    static: i32,
-    stage: ?pi.Stage,
-    pv: [MaxDepth]tp.Move,
-    pv_size: u8,
-    killer: ?tp.Move,
-    move: ?tp.Move,
-    hist_score: ?i32,
-};
-
+// We represent probabilities as u12
 pub const Searcher = struct {
     alloc: std.mem.Allocator,
     b: *bo.Board,
-    stack: []History,
     start_ply: u12,
-    pv_exists: bool,
+    pv: ?tp.Move,
+    stats: hi.Stats,
     thread: *po.Thread,
 
-    stats: hi.Stats,
-
-    // The division by 2 is for overflow protection
-    pub const MateVal = std.math.maxInt(i32) >> 1;
-    pub const CentiPawn: i32 = @divExact(ev.PawnBase, 10);
-    const PieceValue = [_]i32{
-        ev.PawnBase,
-        ev.KnightBase,
-        ev.BishopBase,
-        ev.RookBase,
-        ev.QueenBase,
-    };
-
-    pub fn init(thread: *po.Thread, alloc: std.mem.Allocator) !Searcher {
-        const stack = try alloc.alloc(History, MaxDepth);
-        inline for (0..MaxDepth) |i| stack[i] = std.mem.zeroes(History);
-
+    pub fn init(thread: *po.Thread, alloc: std.mem.Allocator) Searcher {
         return .{
             .alloc = alloc,
             .b = &thread.board,
-            .stack = stack,
             .start_ply = thread.board.hash_in,
-            .pv_exists = false,
-            .thread = thread,
+            .pv = null,
             .stats = hi.Stats.init(),
+            .thread = thread,
         };
     }
 
-    pub fn deinit(self: *Searcher) void {
-        self.alloc.free(self.stack);
-    }
+    pub const Prob = f32;
+    pub const BoundProb = packed struct {
+        p: Prob,
+        bound: Prob,
+    };
 
-    pub inline fn clearStack(self: *Searcher) void {
-        inline for (0..MaxDepth) |i| self.stack[i] = std.mem.zeroes(History);
-    }
+    const DrawVal = BoundProb{ .p = 0.5, .bound = 0 };
+    const LossVal = BoundProb{ .p = 0.0, .bound = 0 };
 
     inline fn historyDraw(self: *const Searcher) bool {
         // 50 move rule
@@ -112,479 +69,100 @@ pub const Searcher = struct {
         return false;
     }
 
-    inline fn updatePv(self: *Searcher, move: tp.Move) void {
-        const ply = self.b.hash_in - self.start_ply;
-
-        const from = @min(MaxDepth - 1, self.stack[ply + 1].pv_size);
-
-        for (0..from) |i| self.stack[ply].pv[i + 1] = self.stack[ply + 1].pv[i];
-        self.stack[ply].pv_size = from + 1;
-        self.stack[ply].pv[0] = move;
-    }
-
-    // This creates some small variance to avoid 3 fold blindness
-    inline fn drawVal() i32 {
-        return @as(i3, undefined);
-    }
-
-    inline fn mateVal(ply: u12) i32 {
-        return -MateVal + @as(i32, ply);
-    }
-
-    inline fn adjustEval(self: *const Searcher, input: i32) i32 {
-        var ret = input;
-
-        if (self.b.move_rule > 8) {
-            const move_rule: f32 = (150 - @as(f32, @floatFromInt(self.b.move_rule))) / 150;
-            ret *= @intFromFloat(1 + move_rule);
-        }
-
-        return std.math.clamp(ret, -MateVal + 1, MateVal - 1);
-    }
-
-    pub inline fn isMate(val: i32) bool {
-        const mate = mateVal(std.math.maxInt(u12));
-        return val <= mate or val >= -mate;
-    }
-
-    pub fn quietSearch(self: *Searcher, a: i32, b: i32) !i32 {
-        const ply = self.b.hash_in - self.start_ply;
-
-        // Check for three fold repetition and 50 move rule
-        if (self.historyDraw()) return drawVal();
-
-        // Check for insufficient material
-        if (self.materialDraw()) return drawVal();
-
-        if (ply >= MaxDepth) return ev.eval(self.b);
-
-        // Mate distance pruning (These are the best possible vals at this ply)
-        var alpha = @max(a, mateVal(ply));
-        const beta = @min(b, -mateVal(ply + 1));
-        if (alpha >= beta) return alpha;
-
-        const gen = mv.Maker.init(self.b);
-
-        const pv = b != a + 1;
-        const inCheck = gen.checks > 0;
-
-        // TT Probe
-        const tte = tt.probe(self.b);
-        const tte_fine = tte.reader != null and tte.usable;
-
-        // Trust the tt entry if it's usable
-        if (!pv and
-            tte_fine and
-            tte.reader.?.usable(alpha, beta))
-            return tte.reader.?.val.score;
-
-        var static = if (tte_fine) tte.reader.?.val.eval else ev.eval(self.b);
-        static = self.adjustEval(static);
-
-        const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
-            tte.reader.?.val.score
-        else
-            static;
-        self.stack[ply].static = static;
-
-        if (eval >= alpha) alpha = eval;
-        if (alpha >= beta) return alpha;
-
-        var pick = pi.Picker.init(.QuietTT, self, &gen, tte);
-        defer pick.deinit();
-
-        const futility = eval + CentiPawn * 11;
-
-        var bestMove: ?tp.Move = null;
-        var bestScore = alpha;
-        var foundMove = false;
-
-        // Removing killer move
-        self.stack[ply].killer = null;
-
-        const lower_bound = alpha;
-        const upper_bound = beta;
-
-        var stage = pick.stage;
-        while (try pick.nextMove()) |move| {
-            self.stack[ply].stage = stage;
-            self.stack[ply].hist_score = pick.current_hist;
-            self.stack[ply].move = move;
-
-            stage = pick.stage;
-            foundMove = true;
-
-            // Pruning, only if not in check
-            if (!inCheck) {
-                // Futility pruning
-                if (self.b.w_pieces.check(move.to) or self.b.b_pieces.check(move.to)) {
-                    if (futility +
-                        PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
-                        continue;
-                }
-            }
-
-            const undo = self.b.apply(move);
-            const score = -try self.quietSearch(-beta, -alpha);
-            self.b.remove(move, undo);
-
-            if (score > bestScore) {
-                bestScore = score;
-
-                if (score > alpha) {
-                    alpha = score;
-                    bestMove = move;
-
-                    // if (pv) {
-                    //     self.updatePv(move);
-                    //     self.stack[ply + 1].pv_size = 0;
-                    // }
-
-                    if (score >= beta) break;
-                }
-            }
-        }
-
-        // Check and stalemate
-        if (!foundMove and inCheck) return mateVal(ply);
-
-        // TT insert
-        tt.store(
-            self.b,
-            bestScore,
-            static,
-            0,
-            lower_bound,
-            upper_bound,
-            bestMove,
-            self.start_ply,
-            tte,
-        );
-
-        return bestScore;
-    }
-
-    pub fn search(self: *Searcher, a: i32, b: i32, dep: i12, cutnode: bool) !i32 {
+    pub fn search(self: *Searcher, bound: Prob, until_prob: Prob) !BoundProb {
         if (self.thread.stopped) return error.NoTime;
-        var depth = dep;
-        const our_plies = @divFloor(depth + 1, 2);
-        const their_plies = @divFloor(depth, 2);
 
-        const ply = self.b.hash_in - self.start_ply;
-        if (depth == 0 or ply >= MaxDepth) return self.quietSearch(a, b);
-
-        // Check for three fold repetition and 50 move rule
-        if (self.historyDraw()) return drawVal();
-
-        // Check for insufficient material
-        if (self.materialDraw()) return drawVal();
-
-        // Mate distance pruning (These are the best possible vals at this ply)
-        var alpha = @max(a, mateVal(ply));
-        const beta = @min(b, -mateVal(ply + 1));
-        if (alpha >= beta) return alpha;
-
-        const gen = mv.Maker.init(self.b);
-
-        const inCheck = gen.checks > 0;
-        const pv = b != a + 1;
-        const root = ply == 0;
+        // Check for basic draws
+        if (self.historyDraw() or self.materialDraw()) return DrawVal;
+        const ply: u24 = @intCast(self.b.hash_in - self.start_ply);
 
         // TT Probe
         const tte = tt.probe(self.b);
         const tte_fine = tte.reader != null and tte.usable;
-        const tte_move = tte_fine and tte.reader.?.val.typ != .Upper;
 
         // Trust the tt entry if it's usable
-        if (!root and
-            tte_fine and
-            (!pv or (tte.reader.?.val.typ == .Exact)) and
-            tte.reader.?.val.depth >= depth and
-            tte.reader.?.usable(alpha, beta))
+        if (ply != 0 and tte_fine and tte.reader.?.usable(bound))
             return tte.reader.?.val.score;
 
-        var static = if (tte_fine) tte.reader.?.val.eval else ev.eval(self.b);
-        static = self.adjustEval(static);
+        const gen = mv.Maker.init(self.b);
 
-        const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
-            tte.reader.?.val.score
-        else
-            static;
-        self.stack[ply].static = static;
-        const improving = !inCheck and
-            (ply <= 1 or static > self.stack[ply - 2].static);
-
-        // This is taken from Weiss (it says it's taken from Rebel there)
-        if (!tte_move) {
-            if (pv and depth >= 3) depth -= 1;
-            if (cutnode and depth >= 8) depth -= 1;
-        }
-
-        // Pruning
-        if (!inCheck and
-            !root and
-            !pv and
-            self.stack[ply - 1].move != null and
-            !isMate(beta))
-        {
-            const futility = beta + CentiPawn *
-                6 *
-                their_plies *
-                (2 - @as(u3, @intFromBool(cutnode)));
-            const razor = if (isMate(alpha))
-                alpha
-            else
-                alpha - CentiPawn *
-                    (15 +
-                    6 *
-                    our_plies *
-                    (1 + @as(u3, @intFromBool(improving))));
-
-            // Reverse futility pruning
-            if (eval >= futility) return eval;
-
-            // Razoring
-            if (!tte_move and !improving and eval < razor) {
-                const score = try self.quietSearch(-alpha - 1, -alpha);
-                if (score < alpha) return if (isMate(score)) alpha else score;
-            }
-
-            const R: i12 = 4 + @divFloor(depth, 4);
-            const null_depth = if (R >= depth) 0 else depth - R;
-
-            // Null move pruning
-            if (eval >= beta and eval >= static and cutnode) {
-                self.stack[ply].stage = null;
-                self.stack[ply].hist_score = null;
-                self.stack[ply].move = null;
-
-                const undo = self.b.applyNull();
-                const score = -try self.search(-beta, -beta + 1, null_depth, !cutnode);
-                self.b.removeNull(undo);
-
-                if (score >= beta) return if (isMate(score)) beta else score;
-            }
-
-            // Prob cut
-            const probcut_add = CentiPawn * 8 - @intFromBool(!improving);
-            const probcut_beta = beta + probcut_add;
-            if (depth >= 4 and eval >= probcut_beta) {
-                var pick = pi.Picker.init(.QuietTT, self, &gen, tte);
-                defer pick.deinit();
-
-                var stage = pick.stage;
-                while (try pick.nextMove()) |move| {
-                    self.stack[ply].stage = stage;
-                    self.stack[ply].hist_score = pick.current_hist;
-                    self.stack[ply].move = move;
-                    stage = pick.stage;
-
-                    const undo = self.b.apply(move);
-                    var score = -try self.quietSearch(-probcut_beta, -probcut_beta + 1);
-                    self.b.remove(move, undo);
-
-                    if (score >= probcut_beta)
-                        score = -try self.search(
-                            -probcut_beta,
-                            -probcut_beta + 1,
-                            null_depth,
-                            !cutnode,
-                        );
-
-                    if (score >= probcut_beta) return if (isMate(score))
-                        score
-                    else
-                        score - probcut_add;
-                }
-            }
-        }
+        var until: Prob = 1.0;
+        var this_prob: Prob = 0.0;
+        var best_score: Prob = 0.0;
+        const ply_sq: Prob = @floatFromInt((1 + ply) * (1 + ply));
 
         var pick = pi.Picker.init(.TT, self, &gen, tte);
         defer pick.deinit();
 
-        const tt_capture = tte_move and !self.b.isQuiet(tte.reader.?.val.move);
-
-        var bestMove: ?tp.Move = null;
-        var bestScore: i32 = -MateVal;
-
-        var histories = try std.ArrayList(tp.Move).initCapacity(self.alloc, 64);
-        defer histories.deinit();
-
-        var move_counter: u8 = 0;
-
-        // Removing killer move
-        self.stack[ply].killer = null;
-
-        const lower_bound = alpha;
-        const upper_bound = beta;
-
-        var stage = pick.stage;
+        var best_move: ?tp.Move = null;
+        var best_cut: Prob = 0.0;
         while (try pick.nextMove()) |move| {
-            self.stack[ply].stage = stage;
-            self.stack[ply].hist_score = pick.current_hist;
-            self.stack[ply].move = move;
-            stage = pick.stage;
-
             const undo = self.b.apply(move);
-
-            var score: i32 = undefined;
-            var next_depth = depth - 1;
-
-            // Check extensions
-            if (!root and ply <= 10 and inCheck) next_depth += 1;
-
-            const quiet = undo.typ == null;
-
-            // Reductions
-            const min_count = @as(u3, @intFromBool(pv)) +
-                @as(u3, @intFromBool(!quiet)) +
-                @as(u3, @intFromBool(self.stack[ply].stage == .TT));
-            if (!isMate(bestScore) and !root and move_counter > min_count) {
-                var R: i12 = 0;
-
-                // LMR
-                const depth_index: u5 = @intCast(@min(31, depth));
-                const ply_index: u5 = @intCast(@min(31, ply));
-                R += Reductions[@intFromBool(quiet)][depth_index][ply_index];
-                if (pick.current_hist) |h|
-                    R -= @intCast(std.math.clamp(@divFloor(h, hi.CentiHist), -2, 2));
-
-                if (cutnode) R += 2;
-                if (tte_fine and tte.reader.?.val.typ == .Exact) R += 1;
-                if (tt_capture) R += 1;
-
-                // Various pruning reduction criteria
-                if (pv) R -= 1;
-                if (inCheck) R -= 1;
-                // if (self.stack[ply].stage == .Killer) R -= 1;
-                if (improving) R -= 1;
-
-                if (R < 0) R = 0;
-                const r_depth = if (R >= next_depth) @min(next_depth, 1) else next_depth - R;
-
-                score = -try self.search(-alpha - 1, -alpha, r_depth, true);
-
-                if (score > alpha and r_depth < next_depth)
-                    score = -try self.search(-alpha - 1, -alpha, next_depth, !cutnode);
-            } else if (!pv or move_counter > 0)
-                score = -try self.search(-alpha - 1, -alpha, next_depth, !cutnode);
-
-            if (pv and (move_counter == 0 or score > alpha))
-                score = -try self.search(-beta, -alpha, next_depth, false);
-
+            const result = try self.search(bound, until * until_prob);
             self.b.remove(move, undo);
 
-            try histories.append(move);
-            move_counter += 1;
-            if (score > bestScore) {
-                bestScore = score;
+            const score = 1 - result.p;
+            if (result.bound > best_cut) best_cut = result.bound;
 
-                if (score > alpha) {
-                    alpha = score;
-                    bestMove = move;
+            self.stats.update(self.b, move, null, score);
 
-                    if (pv) {
-                        self.updatePv(move);
-                        self.stack[ply + 1].pv_size = 0;
-                    }
+            const move_prob = score * until;
 
-                    if (score >= beta) {
-                        self.stats.update(
-                            self.b,
-                            &histories,
-                            if (root) null else self.stack[ply - 1].move,
-                            depth,
-                            move_counter,
-                            @divFloor(score - eval, CentiPawn),
-                        );
-                        if (ply > 0) self.stack[ply - 1].killer = move;
-                        break;
-                    }
-                }
+            // We assume the player will always see the best move first
+            if (score > best_score) {
+                best_move = move;
+                this_prob *= 1 - score;
+                this_prob += score * score;
+                best_score = score;
+            } else this_prob += score * move_prob;
+            until *= 1 - score;
+
+            if (best_move == null) best_move = move;
+
+            const cut = move_prob * until_prob + 1 / ply_sq;
+            if (cut < bound) {
+                if (cut > best_cut) best_cut = cut;
+                this_prob += (1 - score) * move_prob;
+                break;
             }
         }
 
-        // Check and stalemate
-        if (move_counter == 0) return if (inCheck) mateVal(ply) else drawVal();
+        // Check or stalemate
+        if (best_move == null) return if (gen.checks > 0) LossVal else DrawVal;
+
+        // Update pv
+        if (ply == 0) self.pv = best_move;
+
+        const ret = BoundProb{
+            .p = this_prob,
+            .bound = best_cut,
+        };
 
         // TT insert
         tt.store(
             self.b,
-            bestScore,
-            static,
-            depth,
-            lower_bound,
-            upper_bound,
-            bestMove,
-            self.start_ply,
+            ret,
+            best_move.?,
+            @intCast(self.start_ply),
             tte,
         );
 
-        return bestScore;
+        return ret;
     }
 
-    pub fn aspiration(self: *Searcher, prev: i32, depth: i12) !i32 {
-        var delta = 10 + @as(i32, @intCast(@divTrunc(@abs(prev), @as(u32, ev.PawnBase))));
-        var alpha = prev - delta;
-        var beta = prev + delta;
+    pub fn deepening(self: *Searcher) !void {
+        var bound = self.thread.iter;
 
         while (true) {
-            const score = try self.search(alpha, beta, depth, false);
+            self.thread.res.move = self.pv;
+            self.thread.res.bp = self.search(bound, 1) catch |err| {
+                switch (err) {
+                    error.NoTime => break,
+                    else => return err,
+                }
+            };
 
-            if (score <= alpha) {
-                beta = alpha + @divFloor(beta - alpha, 2) + 1;
-                alpha -= delta;
-                if (alpha < -MateVal) alpha = -MateVal;
-            } else if (score >= beta) {
-                beta += delta;
-                if (beta > MateVal) beta = MateVal;
-            } else return score;
-
-            delta += @divFloor(delta, 3);
-            if (delta > MateVal) delta = MateVal;
-        }
-    }
-
-    pub fn iterDeepening(self: *Searcher) !void {
-        var depth: f32 = self.thread.iter;
-        var score: i32 = 0;
-        while (true) {
-            const se_depth: i12 = @intFromFloat(depth + 0.5);
-
-            // If we don't have a PV, we just do a standard search
-            if (!self.pv_exists) {
-                score = self.search(-MateVal, MateVal, se_depth, false) catch |err| {
-                    switch (err) {
-                        error.NoTime => break,
-                        else => return err,
-                    }
-                };
-
-                self.pv_exists = self.stack[0].pv_size != 0;
-            }
-
-            if (self.pv_exists) {
-                score = self.aspiration(score, se_depth) catch |err| {
-                    switch (err) {
-                        error.NoTime => break,
-                        else => return err,
-                    }
-                };
-            }
-
-            // Update the threads result
-            if (self.pv_exists) {
-                self.thread.res = po.Result{
-                    .pv = self.stack[0].pv,
-                    .pv_size = self.stack[0].pv_size,
-                    .score = score,
-                    .depth = se_depth,
-                };
-                depth += self.thread.iter;
-            }
-
-            self.clearStack();
-            if (isMate(score)) break;
+            bound = @min(self.thread.res.bp.bound, bound * self.thread.iter);
         }
     }
 };

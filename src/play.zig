@@ -86,22 +86,12 @@ pub fn play(b: *bo.Board, player: bo.Side, time: i64, minimal: bool) !void {
         }
     } else {
         const best = try po.bestMove(b, time);
-        if (best.depth != 0) {
-            _ = b.apply(best.pv[0]);
-            if (!minimal) {
-                b.print();
-                for (0..@intCast(best.pv_size)) |i| {
-                    std.debug.print("\t=> ", .{});
-                    best.pv[i].print();
-                    std.debug.print("\n", .{});
-                }
-            }
-            best.pv[0].print();
+        if (best.move) |move| {
+            _ = b.apply(move);
+            if (!minimal) b.print();
+            move.print();
             std.debug.print("\n", .{});
-            if (se.Searcher.isMate(best.score)) {
-                const len = @divFloor(best.depth + 1, 2);
-                std.debug.print(" => Mate in {}\n", .{len});
-            } else std.debug.print(" => Depth: {}, Eval: {}\n", .{ best.depth, best.score });
+            std.debug.print(" => Score: {}, Bound: {}\n", .{ best.bp.p, best.bp.bound });
         } else {
             const gen = mv.Maker.init(b);
             if (gen.checks > 0)
@@ -116,23 +106,13 @@ pub fn play(b: *bo.Board, player: bo.Side, time: i64, minimal: bool) !void {
 }
 
 pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64, minimal: bool) !void {
-    const best = try po.bestMove(b, if (b.side == .White) time1 else time2);
-    if (best.depth != 0) {
-        _ = b.apply(best.pv[0]);
-        if (!minimal) {
-            b.print();
-            for (0..@intCast(best.pv_size)) |i| {
-                std.debug.print("\t=> ", .{});
-                best.pv[i].print();
-                std.debug.print("\n", .{});
-            }
-        }
-        best.pv[0].print();
-        std.debug.print("\n", .{});
-        if (se.Searcher.isMate(best.score)) {
-            const len = @divFloor(best.depth + 1, 2);
-            std.debug.print(" => Mate in {}\n", .{len});
-        } else std.debug.print(" => Depth: {}, Eval: {}\n", .{ best.depth, best.score });
+        const best = try po.bestMove(b, if (b.side == .White) time1 else time2);
+        if (best.move) |move| {
+            _ = b.apply(move);
+            if (!minimal) b.print();
+            move.print();
+            std.debug.print("\n", .{});
+            std.debug.print(" => Score: {}, Bound: {}\n", .{ best.bp.p, best.bp.bound });
     } else {
         const gen = mv.Maker.init(b);
         if (gen.checks > 0) {
