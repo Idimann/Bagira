@@ -67,6 +67,8 @@ pub const Picker = struct {
     }
 
     pub fn nextMove(self: *Picker) !?tp.Move {
+        const ply: u24 = @intCast(self.search.b.hash_in - self.search.start_ply);
+
         switch (self.stage) {
             .TT => {
                 self.stage = .GenCaptures;
@@ -86,7 +88,7 @@ pub const Picker = struct {
                 for (0..self.list.items.len) |i| {
                     const score = self.search.stats.get(
                         self.search.b,
-                        null,
+                        if (ply == 0) null else self.search.stack[ply - 1],
                         self.list.items[i],
                     );
                     self.score_list.appendAssumeCapacity(score);
@@ -114,7 +116,7 @@ pub const Picker = struct {
                 for (0..self.list.items.len) |i| {
                     const score = self.search.stats.get(
                         self.search.b,
-                        null,
+                        if (ply == 0) null else self.search.stack[ply - 1],
                         self.list.items[i],
                     );
                     self.score_list.appendAssumeCapacity(score);

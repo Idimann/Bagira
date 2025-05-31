@@ -18,5 +18,5 @@ pub fn main() !void {
     var b = try bo.Board.fromFen(pos.start);
     std.debug.print("Static: {}\n", .{ev.eval(&b)});
 
-    try pl.play(&b, .White, 2000, false);
+    try pl.play(&b, .Black, 8000, false);
 }

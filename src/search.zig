@@ -13,6 +13,7 @@ pub const Searcher = struct {
     b: *bo.Board,
     start_ply: u12,
     pv: ?tp.Move,
+    stack: [2048]tp.Move,
     stats: hi.Stats,
     thread: *po.Thread,
 
@@ -22,6 +23,7 @@ pub const Searcher = struct {
             .b = &thread.board,
             .start_ply = thread.board.hash_in,
             .pv = null,
+            .stack = std.mem.zeroes([2048]tp.Move),
             .stats = hi.Stats.init(),
             .thread = thread,
         };
@@ -69,7 +71,11 @@ pub const Searcher = struct {
         return false;
     }
 
-    pub fn search(self: *Searcher, bound: Prob, until_prob: Prob) !BoundProb {
+    pub fn search(
+        self: *Searcher,
+        bound: Prob,
+        until_prob: Prob,
+    ) !BoundProb {
         if (self.thread.stopped) return error.NoTime;
 
         // Check for basic draws
@@ -89,7 +95,7 @@ pub const Searcher = struct {
         var until: Prob = 1.0;
         var this_prob: Prob = 0.0;
         var best_score: Prob = 0.0;
-        const ply_sq: Prob = @floatFromInt((1 + ply) * (1 + ply));
+        const ply_sq = 1 / @as(Prob, @floatFromInt((1 + ply) * (1 + ply)));
 
         var pick = pi.Picker.init(.TT, self, &gen, tte);
         defer pick.deinit();
@@ -97,19 +103,29 @@ pub const Searcher = struct {
         var best_move: ?tp.Move = null;
         var best_cut: Prob = 0.0;
         while (try pick.nextMove()) |move| {
+            self.stack[ply] = move;
+
             const undo = self.b.apply(move);
-            const result = try self.search(bound, until * until_prob);
+
+            const next_prob = @min(1, until * until_prob + ply_sq);
+            const result = try self.search(bound, next_prob);
+
             self.b.remove(move, undo);
 
             const score = 1 - result.p;
             if (result.bound > best_cut) best_cut = result.bound;
 
-            self.stats.update(self.b, move, null, score);
+            self.stats.update(
+                self.b,
+                move,
+                if (ply == 0) null else self.stack[ply - 1],
+                score,
+            );
 
             const move_prob = score * until;
 
             // We assume the player will always see the best move first
-            if (score > best_score) {
+            if (score > best_score or best_move == null) {
                 best_move = move;
                 this_prob *= 1 - score;
                 this_prob += score * score;
@@ -117,9 +133,7 @@ pub const Searcher = struct {
             } else this_prob += score * move_prob;
             until *= 1 - score;
 
-            if (best_move == null) best_move = move;
-
-            const cut = move_prob * until_prob + 1 / ply_sq;
+            const cut = move_prob * until_prob + ply_sq;
             if (cut < bound) {
                 if (cut > best_cut) best_cut = cut;
                 this_prob += (1 - score) * move_prob;

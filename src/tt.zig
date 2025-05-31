@@ -11,7 +11,7 @@ pub const TT_Entry = struct {
         hash: u32 = 0,
         score: se.Searcher.BoundProb = .{ .p = 0.0, .bound = 1 },
         move: tp.Move = std.mem.zeroes(tp.Move),
-        insert_time: u17 = 0,
+        insert_time: u15 = 0,
     } = .{},
 
     pub inline fn getCheck(self: *const TT_Entry) u64 {
@@ -59,7 +59,7 @@ inline fn put(
     b: *const bo.Board,
     score: se.Searcher.BoundProb,
     move: tp.Move,
-    insert_time: u17,
+    insert_time: u15,
 ) void {
     const index = b.hash[b.hash_in] % TT_Size;
     var entry = TT_Entry{
@@ -79,16 +79,11 @@ pub inline fn store(
     b: *const bo.Board,
     score: se.Searcher.BoundProb,
     move: tp.Move,
-    insert_time: u17,
+    insert_time: u15,
     tte: TT_Result,
 ) void {
     if (tte.reader == null) {
-        put(
-            b,
-            score,
-            move,
-            insert_time,
-        );
+        put(b, score, move, insert_time);
         return;
     }
 
@@ -102,10 +97,5 @@ pub inline fn store(
         @as(se.Searcher.Prob, @floatFromInt(time_diff)) * 0.25;
     const our_val = 1 - score.bound;
 
-    if (our_val > tte_val) put(
-        b,
-        score,
-        move,
-        insert_time,
-    );
+    if (our_val > tte_val) put(b, score, move, insert_time);
 }
