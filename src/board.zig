@@ -9,6 +9,10 @@ pub const Side = enum(u1) {
     pub inline fn other(self: *Side) void {
         self.* = @enumFromInt(~@intFromEnum(self.*));
     }
+
+    pub inline fn getOther(self: Side) Side {
+        return @enumFromInt(~@intFromEnum(self));
+    }
 };
 pub const Board = struct {
     w_pieces: tp.BitBoard,
@@ -255,6 +259,68 @@ pub const Board = struct {
         }
 
         ret.initHash();
+        return ret;
+    }
+
+    pub fn toFen(self: *const Board, alloc: std.mem.Allocator) !std.ArrayList(u8) {
+        var stage = FenStage.Start;
+        var ret = std.ArrayList(u8).init(alloc);
+
+        var pos = tp.Square.a8;
+        var counter: u8 = 0;
+        while (true) {
+            switch (stage) {
+                .Start => {
+                    if (self.w_pieces.check(pos) or self.b_pieces.check(pos)) {
+                        if (counter > 0) try ret.append(counter + '0');
+                        try ret.append(self.pieceType(pos).char(self.w_pieces.check(pos)));
+                        counter = 0;
+                    } else counter += 1;
+
+                    if (pos == .h1) {
+                        if (counter > 0) try ret.append(counter + '0');
+                        stage = .Who;
+                        counter = 0;
+                        continue;
+                    }
+
+                    if (pos.file() == .FileH) {
+                        if (counter > 0) try ret.append(counter + '0');
+                        pos = @enumFromInt(@intFromEnum(pos) - 15);
+                        try ret.append('/');
+                        counter = 0;
+                    } else _ = pos.apply(.East);
+                },
+                .Who => {
+                    try ret.append(' ');
+                    try ret.append(if (self.side == .White) 'w' else 'b');
+                    stage = .Castling;
+                },
+                .Castling => {
+                    try ret.append(' ');
+                    if (self.castle.none())
+                        try ret.append('-')
+                    else {
+                        if (self.castle.wk) try ret.append('K');
+                        if (self.castle.wq) try ret.append('Q');
+                        if (self.castle.bk) try ret.append('k');
+                        if (self.castle.bq) try ret.append('q');
+                    }
+
+                    stage = .EnPassant;
+                },
+                .EnPassant => {
+                    try ret.append(' ');
+                    if (self.enPassant().lsb()) |sq| {
+                        const str = sq.toString();
+                        try ret.appendSlice(&str);
+                    } else try ret.append('-');
+
+                    break;
+                },
+            }
+        }
+
         return ret;
     }
 

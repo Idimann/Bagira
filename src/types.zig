@@ -144,7 +144,7 @@ pub const Square = enum(u6) {
     }
 
     pub fn apply(self: *Square, dir: Direction) *Square {
-        self.* = @enumFromInt(@as(i7, @intFromEnum(self)) + @intFromEnum(dir));
+        self.* = @enumFromInt(@as(i7, @intFromEnum(self.*)) + @intFromEnum(dir));
         return self;
     }
 
@@ -211,6 +211,17 @@ pub const PieceType = enum(u6) {
     Rook,
     Queen,
     King,
+
+    pub inline fn char(self: PieceType, upper: bool) u8 {
+        return switch (self) {
+            .Pawn => if (upper) 'P' else 'p',
+            .Knight => if (upper) 'N' else 'n',
+            .Bishop => if (upper) 'B' else 'b',
+            .Rook => if (upper) 'R' else 'r',
+            .Queen => if (upper) 'Q' else 'q',
+            .King => if (upper) 'K' else 'k',
+        };
+    }
 };
 
 pub const BitBoard = packed struct {
@@ -345,6 +356,10 @@ pub const Castling = packed struct {
     wq: bool,
     bk: bool,
     bq: bool,
+
+    pub inline fn none(self: Castling) bool {
+        return !self.wk and !self.wq and !self.bk and !self.bq;
+    }
 };
 
 pub const MoveType = enum(u3) {

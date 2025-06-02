@@ -47,6 +47,10 @@ pub const TT_Result = struct {
     usable: bool,
 };
 
+pub fn clear() void {
+    for (0..TT_Size) |i| TT[i] = std.mem.zeroes(TT_Entry);
+}
+
 pub inline fn probe(b: *const bo.Board) TT_Result {
     const read = TT[b.hash[b.hash_in] % TT_Size];
 

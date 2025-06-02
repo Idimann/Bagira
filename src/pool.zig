@@ -2,6 +2,7 @@ const std = @import("std");
 const tp = @import("types.zig");
 const bo = @import("board.zig");
 const se = @import("search.zig");
+const ev = @import("eval.zig");
 
 pub const Result = struct {
     pv: [se.MaxDepth]tp.Move,
@@ -14,6 +15,7 @@ pub const Thread = struct {
     thread: ?std.Thread,
 
     board: bo.Board,
+    nn: ev.NN,
     search: se.Searcher,
 
     iter: f32,
@@ -21,20 +23,27 @@ pub const Thread = struct {
     res: Result,
 
     inline fn val(self: *const Thread, worst: i32) i32 {
-        return (self.res.score - worst + 1) * @as(i32, @intCast(self.res.depth));
+        const max = std.math.maxInt(i16);
+        const clamp1 = std.math.clamp(self.res.score - worst + 1, 0, max);
+        const clamp2 = std.math.clamp(@as(i32, @intCast(self.res.depth)), 0, max);
+
+        return clamp1 * clamp2;
     }
 };
 
 const PoolSize = 6;
 var Pool: [PoolSize]Thread = undefined;
-fn initPool(b: *const bo.Board) !void {
+fn initPool(b: *const bo.Board, nn: *ev.NN) !void {
     const float_size: f32 = @floatFromInt(PoolSize);
     const max_iter_add = std.math.clamp(float_size * 0.2, 1, 2) - 1;
 
+    nn.inputAccum(b);
     inline for (0..PoolSize) |i| {
         Pool[i].thread = null;
 
         Pool[i].board = b.*;
+        Pool[i].nn = nn.*;
+
         Pool[i].search = try se.Searcher.init(&Pool[i], std.heap.c_allocator);
 
         Pool[i].iter = 1 + max_iter_add * (@as(f32, @floatFromInt(i + 1)) / float_size - 1);
@@ -66,9 +75,9 @@ inline fn stopSearch() void {
     }
 }
 
-pub fn bestMove(b: *bo.Board, time: i64) !Result {
+pub fn bestMove(b: *bo.Board, nn: *ev.NN, time: i64) !Result {
     const start = std.time.milliTimestamp();
-    try initPool(b);
+    try initPool(b, nn);
 
     try startSearch();
 
