@@ -1,307 +1,199 @@
 const std = @import("std");
-const ta = @import("tablegen.zig");
 const tp = @import("types.zig");
 const bo = @import("board.zig");
-
-const SCALE: i32 = 400;
-const QA: i16 = 255;
-const QB: i16 = 64;
-
-const InputSize = 768;
-const AccumSize = 256;
-
-const Net = extern struct {
-    acc_weights: [InputSize][AccumSize]i16,
-    acc_biases: [AccumSize]i16,
-    out_weights: [2 * AccumSize]i16,
-    out_bias: i16,
-};
-pub const NN = struct {
-    accum_w: [AccumSize]i32,
-    accum_b: [AccumSize]i32,
-
-    network: Net,
-    const Folder = "networks/";
-    const Network = "baseline.bin";
-    pub fn init() !NN {
-        const file = try std.fs.cwd().openFile(Folder ++ Network, .{ .mode = .read_only });
-        defer file.close();
-
-        var buf_reader = std.io.bufferedReader(file.reader());
-        var reader = buf_reader.reader();
-
-        return .{
-            .accum_w = std.mem.zeroes([AccumSize]i32),
-            .accum_b = std.mem.zeroes([AccumSize]i32),
-            .network = try reader.readStructEndian(Net, .little),
-        };
-    }
-
-    // Squared Clipped ReLU (SCReLU)
-    inline fn activation(i: i32) i32 {
-        const clamp = std.math.clamp(i, 0, QA);
-        return clamp * clamp;
-    }
-
-    inline fn calcIndex(
-        perspective: bo.Side,
-        sq: tp.Square,
-        piece: tp.PieceType,
-        side: bo.Side,
-    ) usize {
-        const piece_in: usize = @intCast(@intFromEnum(piece));
-        var side_in: usize = @intCast(@intFromEnum(side));
-        var sq_in: usize = @intCast(@intFromEnum(sq));
-        if (perspective == .Black) {
-            side_in = 1 - side_in;
-            sq_in ^= 0b111000;
-        }
-
-        return side_in * 6 * 64 + piece_in * 64 + sq_in;
-    }
-
-    inline fn accumAdd(self: *NN, sq: tp.Square, typ: tp.PieceType, side: bo.Side) void {
-        const index_w = calcIndex(.White, sq, typ, side);
-        const index_b = calcIndex(.Black, sq, typ, side);
-
-        for (0..AccumSize) |i| {
-            self.accum_w[i] += self.network.acc_weights[index_w][i];
-            self.accum_b[i] += self.network.acc_weights[index_b][i];
-        }
-    }
-
-    inline fn accumSub(self: *NN, sq: tp.Square, typ: tp.PieceType, side: bo.Side) void {
-        const index_w = calcIndex(.White, sq, typ, side);
-        const index_b = calcIndex(.Black, sq, typ, side);
-
-        for (0..AccumSize) |i| {
-            self.accum_w[i] -= self.network.acc_weights[index_w][i];
-            self.accum_b[i] -= self.network.acc_weights[index_b][i];
-        }
-    }
-
-    pub inline fn inputAccum(self: *NN, b: *const bo.Board) void {
-        var iter = b.w_pieces;
-        while (iter.popLsb()) |sq| {
-            for (0..AccumSize) |i| {
-                const index = calcIndex(.White, sq, b.pieceType(sq), .White);
-                const index2 = calcIndex(.Black, sq, b.pieceType(sq), .White);
-                self.accum_w[i] += @intCast(self.network.acc_weights[index][i]);
-                self.accum_b[i] += @intCast(self.network.acc_weights[index2][i]);
-            }
-        }
-        iter = b.b_pieces;
-        while (iter.popLsb()) |sq| {
-            for (0..AccumSize) |i| {
-                const index = calcIndex(.White, sq, b.pieceType(sq), .Black);
-                const index2 = calcIndex(.Black, sq, b.pieceType(sq), .Black);
-                self.accum_w[i] += @intCast(self.network.acc_weights[index2][i]);
-                self.accum_b[i] += @intCast(self.network.acc_weights[index][i]);
-            }
-        }
-
-        for (0..AccumSize) |i| {
-            self.accum_w[i] += @intCast(self.network.acc_biases[i]);
-            self.accum_b[i] += @intCast(self.network.acc_biases[i]);
-        }
-    }
-
-    // This should be called after the move has already been made
-    pub inline fn move(self: *NN, b: *const bo.Board, m: tp.Move, undo: tp.Remove) void {
-        switch (m.typ) {
-            .Normal => {
-                const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, typ, b.side.getOther());
-                if (undo.typ) |t| self.accumSub(m.to, t, b.side);
-            },
-            .EnPassant => {
-                const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, typ, b.side.getOther());
-                if (b.side == .White)
-                    self.accumSub(m.to.getApply(.North), .Pawn, b.side)
-                else
-                    self.accumSub(m.to.getApply(.South), .Pawn, b.side);
-            },
-            .CastleKingside => {
-                const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, typ, b.side.getOther());
-                if (b.side == .White) {
-                    self.accumSub(.h8, .Rook, .Black);
-                    self.accumAdd(.f8, .Rook, .Black);
-                } else {
-                    self.accumSub(.h1, .Rook, .White);
-                    self.accumAdd(.f1, .Rook, .White);
-                }
-            },
-            .CastleQueenside => {
-                const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, typ, b.side.getOther());
-                if (b.side == .White) {
-                    self.accumSub(.a8, .Rook, .Black);
-                    self.accumAdd(.d8, .Rook, .Black);
-                } else {
-                    self.accumSub(.a1, .Rook, .White);
-                    self.accumAdd(.d1, .Rook, .White);
-                }
-            },
-            .PromKnight => {
-                const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, .Knight, b.side.getOther());
-                if (undo.typ) |t| self.accumSub(m.to, t, b.side);
-            },
-            .PromBishop => {
-                const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, .Bishop, b.side.getOther());
-                if (undo.typ) |t| self.accumSub(m.to, t, b.side);
-            },
-            .PromRook => {
-                const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, .Rook, b.side.getOther());
-                if (undo.typ) |t| self.accumSub(m.to, t, b.side);
-            },
-            .PromQueen => {
-                const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, .Queen, b.side.getOther());
-                if (undo.typ) |t| self.accumSub(m.to, t, b.side);
-            },
-        }
-    }
-
-    // This should be called before the move gets removed
-    pub inline fn remove(self: *NN, b: *const bo.Board, m: tp.Move, undo: tp.Remove) void {
-        switch (m.typ) {
-            .Normal => {
-                const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, typ, b.side.getOther());
-                if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
-            },
-            .EnPassant => {
-                const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, typ, b.side.getOther());
-                if (b.side == .White)
-                    self.accumAdd(m.to.getApply(.North), .Pawn, b.side)
-                else
-                    self.accumAdd(m.to.getApply(.South), .Pawn, b.side);
-            },
-            .CastleKingside => {
-                const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, typ, b.side.getOther());
-                if (b.side == .White) {
-                    self.accumAdd(.h8, .Rook, .Black);
-                    self.accumSub(.f8, .Rook, .Black);
-                } else {
-                    self.accumAdd(.h1, .Rook, .White);
-                    self.accumSub(.f1, .Rook, .White);
-                }
-            },
-            .CastleQueenside => {
-                const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, typ, b.side.getOther());
-                if (b.side == .White) {
-                    self.accumAdd(.a8, .Rook, .Black);
-                    self.accumSub(.d8, .Rook, .Black);
-                } else {
-                    self.accumAdd(.a1, .Rook, .White);
-                    self.accumSub(.d1, .Rook, .White);
-                }
-            },
-            .PromKnight => {
-                const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, .Knight, b.side.getOther());
-                if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
-            },
-            .PromBishop => {
-                const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, .Bishop, b.side.getOther());
-                if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
-            },
-            .PromRook => {
-                const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, .Rook, b.side.getOther());
-                if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
-            },
-            .PromQueen => {
-                const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, .Queen, b.side.getOther());
-                if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
-            },
-        }
-    }
-
-    pub inline fn output(self: *NN, side: bo.Side) i32 {
-        var ret: i32 = 0;
-
-        for (0..AccumSize) |i| {
-            if (side == .White) {
-                ret += activation(self.accum_w[i]) *
-                    @as(i32, @intCast(self.network.out_weights[i]));
-                ret += activation(self.accum_b[i]) *
-                    @as(i32, @intCast(self.network.out_weights[i + AccumSize]));
-            } else {
-                ret += activation(self.accum_w[i]) *
-                    @as(i32, @intCast(self.network.out_weights[i + AccumSize]));
-                ret += activation(self.accum_b[i]) *
-                    @as(i32, @intCast(self.network.out_weights[i]));
-            }
-        }
-        ret = @divTrunc(ret, QA);
-        ret += @intCast(self.network.out_bias);
-
-        ret *= SCALE;
-        ret = @divTrunc(ret, QA * QB);
-        return ret;
-    }
-};
+const ta = @import("tablegen.zig");
+const mv = @import("movegen.zig");
 
 pub const PawnBase = 100;
+const PawnRank = [_]i32{ 0, 0, -4, 8, 10, 11, 17, 0 };
+const PawnFile = [_]i32{ 2, 0, 1, 4, 4, 1, 0, 2 };
+const PawnHold = 3;
+const PawnControlFile = [_]i32{ 1, 0, 3, 4, 4, 3, 0, 1 };
+fn eval_pawn(b: *const bo.Board, dat: *const mv.Data, sq: tp.Square, side: bo.Side) i32 {
+    _ = b;
+    var ret: i32 = PawnBase;
+
+    const rank: tp.Rank = if (side == .White)
+        sq.rank()
+    else
+        @enumFromInt(7 - @intFromEnum(sq.rank()));
+    const file = sq.file();
+    ret += PawnRank[@intFromEnum(rank)] + PawnFile[@intFromEnum(file)];
+
+    var iter = if (side == .White)
+        ta.PawnAttacksWhite[@intFromEnum(sq)]
+    else
+        ta.PawnAttacksBlack[@intFromEnum(sq)];
+    while (iter.popLsb()) |s| {
+        const s_file = @intFromEnum(s.file());
+        const control = if (side == .White)
+            @intFromEnum(s.rank()) >= 3
+        else
+            @intFromEnum(s.rank()) <= 4;
+
+        if (control) ret += PawnControlFile[s_file];
+        if (dat.our.check(s)) ret += PawnHold;
+    }
+
+    return ret;
+}
+
 pub const KnightBase = 305;
+const KnightRank = [_]i32{ 0, 2, 3, 3, 6, 6, 5, 3 };
+const KnightFile = [_]i32{ 0, 0, 3, 4, 4, 3, 0, 0 };
+const KnightAttack = 5;
+const KnightFree = [_]i32{ -20, -13, -5, 0, 3, 8, 9, 11, 15 };
+fn eval_knight(b: *const bo.Board, dat: *const mv.Data, sq: tp.Square, side: bo.Side) i32 {
+    _ = b;
+    var ret: i32 = KnightBase;
+
+    const rank: tp.Rank = if (side == .White)
+        sq.rank()
+    else
+        @enumFromInt(7 - @intFromEnum(sq.rank()));
+    const file = sq.file();
+    ret += KnightRank[@intFromEnum(rank)] + KnightFile[@intFromEnum(file)];
+
+    ret += @intCast(KnightAttack *
+        ta.KnightAttacks[@intFromEnum(sq)].op_and(dat.their).popcount());
+    ret += KnightFree[ta.KnightAttacks[@intFromEnum(sq)].without(dat.our).popcount()];
+
+    return ret;
+}
+
 pub const BishopBase = 335;
+const BishopRowCount = [_]i32{ -6, -3, 0, 1, 2, 4, 10, 15, 25 };
+const BishopRowFree = [_]i32{ -5, -2, 0, 3, 5, 11, 20, 30 };
+fn eval_bishop(b: *const bo.Board, dat: *const mv.Data, sq: tp.Square) i32 {
+    _ = b;
+    var ret: i32 = BishopBase;
+
+    const diag = sq.diagonal();
+    const anti = sq.antiDiagonal();
+
+    const goto = ta.getDiag(sq, dat.combi).without(dat.our);
+    ret += BishopRowFree[goto.op_and(tp.DiagonalMask[diag]).popcount()];
+    ret += BishopRowFree[goto.op_and(tp.AntiDiagonalMask[anti]).popcount()];
+
+    ret += BishopRowCount[tp.DiagonalMask[diag].popcount()];
+    ret += BishopRowCount[tp.AntiDiagonalMask[anti].popcount()];
+
+    return ret;
+}
+
 pub const RookBase = 495;
+const RookRank = [_]i32{ 0, 2, 2, 3, 5, 7, 16, 17 };
+const RookFile = [_]i32{ -2, 0, 3, 6, 6, 3, 0, -2 };
+const RookRankFree = [_]i32{ -1, 0, 0, 1, 1, 2, 3, 4 };
+const RookFileFree = [_]i32{ -4, -3, 0, 3, 8, 13, 17, 22 };
+fn eval_rook(b: *const bo.Board, dat: *const mv.Data, sq: tp.Square, side: bo.Side) i32 {
+    _ = b;
+    var ret: i32 = RookBase;
+
+    const rank: tp.Rank = if (side == .White)
+        sq.rank()
+    else
+        @enumFromInt(7 - @intFromEnum(sq.rank()));
+    const file = sq.file();
+    ret += RookRank[@intFromEnum(rank)] + RookFile[@intFromEnum(file)];
+
+    const goto = ta.getLine(sq, dat.combi).without(dat.our);
+    ret += RookRankFree[goto.op_and(tp.RankMask[@intFromEnum(rank)]).popcount()];
+    ret += RookFileFree[goto.op_and(tp.FileMask[@intFromEnum(file)]).popcount()];
+
+    return ret;
+}
+
 pub const QueenBase = 965;
-const Initiative = 8;
-pub const CentiPawn: i32 = @divExact(PawnBase, 10);
-pub fn eval(b: *const bo.Board) i32 {
+const QueenRank = [_]i32{ 0, 5, -1, 3, 5, 7, 8, 9 };
+const QueenFile = [_]i32{ 3, 5, 6, 1, 1, 6, 5, 3 };
+fn eval_queen(b: *const bo.Board, dat: *const mv.Data, sq: tp.Square, side: bo.Side) i32 {
+    _ = b;
+    _ = dat;
+    var ret: i32 = QueenBase;
+
+    const rank: tp.Rank = if (side == .White)
+        sq.rank()
+    else
+        @enumFromInt(7 - @intFromEnum(sq.rank()));
+    const file = sq.file();
+    ret += QueenRank[@intFromEnum(rank)] + QueenFile[@intFromEnum(file)];
+
+    return ret;
+}
+
+const KingRank = [_]i32{ 10, 0, -20, -50, -130, -250, -260, -300 };
+const KingFile = [_]i32{ 30, 25, 15, -10, -5, 5, 25, 30 };
+const OpenMalus: i32 = -60;
+const CastleBonus: i32 = 8;
+fn eval_king(b: *const bo.Board, dat: *const mv.Data, side: bo.Side) i32 {
     var ret: i32 = 0;
 
-    var iter = b.w_pieces;
-    while (iter.popLsb()) |sq| {
-        ret += switch (b.pieceType(sq)) {
-            .Pawn => PawnBase,
-            .Knight => KnightBase,
-            .Bishop => BishopBase,
-            .Rook => RookBase,
-            .Queen => QueenBase,
-            .King => 0,
-        };
+    const rank: tp.Rank = if (side == .White)
+        dat.our_king.rank()
+    else
+        @enumFromInt(7 - @intFromEnum(dat.our_king.rank()));
+    const file = dat.our_king.file();
+    ret += KingRank[@intFromEnum(rank)] + KingFile[@intFromEnum(file)];
+
+    // Being in front of the pawns is evaluated as good by this, that should be taken care of
+    // by the rank mali though (in most cases)
+    const pop: i32 = @intCast(tp.FileMask[@intFromEnum(file)].op_and(b.pawns).popcount());
+    if (pop <= 1) ret -= OpenMalus * (2 - pop);
+
+    if (side == .White) {
+        if (b.castle.wk) ret += CastleBonus;
+        if (b.castle.wq) ret += CastleBonus;
+    } else {
+        if (b.castle.bk) ret += CastleBonus;
+        if (b.castle.bq) ret += CastleBonus;
     }
 
-    iter = b.b_pieces;
+    return ret;
+}
+
+pub const CentiPawn: i32 = @divExact(PawnBase, 10);
+const TempBonus = 8;
+fn eval_part(b: *const bo.Board, side: bo.Side) i32 {
+    const dat: mv.Data = .{
+        .combi = b.w_pieces.op_or(b.b_pieces),
+        .our = if (side == .White) b.w_pieces else b.b_pieces,
+        .their = if (side == .White) b.b_pieces else b.w_pieces,
+        .our_king = if (side == .White) b.w_king else b.b_king,
+    };
+
+    var ret: i32 = eval_king(b, &dat, side);
+    if (b.side == side) ret += TempBonus;
+
+    var iter = dat.our;
     while (iter.popLsb()) |sq| {
-        ret -= switch (b.pieceType(sq)) {
-            .Pawn => PawnBase,
-            .Knight => KnightBase,
-            .Bishop => BishopBase,
-            .Rook => RookBase,
-            .Queen => QueenBase,
-            .King => 0,
-        };
+        if (b.diags.check(sq)) {
+            if (b.lines.check(sq))
+                ret += eval_queen(b, &dat, sq, side)
+            else
+                ret += eval_bishop(b, &dat, sq);
+        } else if (b.lines.check(sq))
+            ret += eval_rook(b, &dat, sq, side)
+        else if (b.pawns.check(sq))
+            ret += eval_pawn(b, &dat, sq, side)
+        else if (dat.our_king != sq)
+            ret += eval_knight(b, &dat, sq, side);
     }
 
-    return Initiative + (if (b.side == .White) ret else -ret);
+    return ret;
+}
+
+pub fn eval(b: *const bo.Board) i32 {
+    const white = eval_part(b, .White);
+    const black = eval_part(b, .Black);
+    return if (b.side == .White) white - black else black - white;
+}
+
+pub inline fn adjust(input: i32, b: *const bo.Board) i32 {
+    var ret = input;
+
+    const move_rule_adjust: f32 = (150 - @as(f32, @floatFromInt(b.move_rule))) / 150;
+    ret *= @intFromFloat(1 + move_rule_adjust);
+
+    return ret;
 }

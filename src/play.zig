@@ -4,7 +4,7 @@ const bo = @import("board.zig");
 const mv = @import("movegen.zig");
 const po = @import("pool.zig");
 const se = @import("search.zig");
-const ev = @import("eval.zig");
+const nn = @import("nn.zig");
 
 pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
     if (dep == 0) {
@@ -51,7 +51,7 @@ pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     list.deinit();
 }
 
-pub fn play(b: *bo.Board, nn: *ev.NN, player: bo.Side, time: i64, minimal: bool) !void {
+pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool) !void {
     if (b.side == player) {
         const stdin = std.io.getStdIn().reader();
         _ = try stdin.readByte();
@@ -86,7 +86,7 @@ pub fn play(b: *bo.Board, nn: *ev.NN, player: bo.Side, time: i64, minimal: bool)
             break;
         }
     } else {
-        const best = try po.bestMove(b, nn, time);
+        const best = try po.bestMove(b, nnw, time);
         if (best.depth != 0) {
             _ = b.apply(best.pv[0]);
             if (!minimal) {
@@ -113,7 +113,7 @@ pub fn play(b: *bo.Board, nn: *ev.NN, player: bo.Side, time: i64, minimal: bool)
         }
     }
 
-    try play(b, nn, player, time, minimal);
+    try play(b, nnw, player, time, minimal);
 }
 
 pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64, minimal: bool) !void {

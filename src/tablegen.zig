@@ -1,9 +1,8 @@
 //Most of this is taken from Avalanche (Not the logic, just the numbers)
-// https://analog-hors.github.io/site/magic-bitboards/
+//https://analog-hors.github.io/site/magic-bitboards/
 
 const std = @import("std");
 const tp = @import("types.zig");
-const bo = @import("board.zig");
 
 pub const KingAttacks = [64]tp.BitBoard{
     .{ .v = 0x302 },

@@ -2,6 +2,7 @@ const std = @import("std");
 const tp = @import("types.zig");
 const bo = @import("board.zig");
 const mv = @import("movegen.zig");
+const nn = @import("nn.zig");
 const ev = @import("eval.zig");
 const tt = @import("tt.zig");
 const po = @import("pool.zig");
@@ -38,7 +39,7 @@ const History = struct {
 pub const Searcher = struct {
     alloc: std.mem.Allocator,
     b: *bo.Board,
-    nn: *ev.NN,
+    nnw: *nn.NN,
     stack: []History,
     start_ply: u12,
     pv_exists: bool,
@@ -63,7 +64,7 @@ pub const Searcher = struct {
         return .{
             .alloc = alloc,
             .b = &thread.board,
-            .nn = &thread.nn,
+            .nnw = &thread.nnw,
             .stack = stack,
             .start_ply = thread.board.hash_in,
             .pv_exists = false,
@@ -137,6 +138,12 @@ pub const Searcher = struct {
         return val <= mate or val >= -mate;
     }
 
+    inline fn evaluate(self: *Searcher) i32 {
+        // const score = ev.eval(self.b);
+        const score = self.nnw.output(self.b.side);
+        return ev.adjust(score, self.b);
+    }
+
     pub fn quietSearch(self: *Searcher, a: i32, b: i32) !i32 {
         const ply = self.b.hash_in - self.start_ply;
 
@@ -146,7 +153,7 @@ pub const Searcher = struct {
         // Check for insufficient material
         if (self.materialDraw()) return drawVal();
 
-        if (ply >= MaxDepth) return self.nn.output(self.b.side);
+        if (ply >= MaxDepth) return self.evaluate();
 
         // Mate distance pruning (These are the best possible vals at this ply)
         var alpha = @max(a, mateVal(ply));
@@ -168,7 +175,7 @@ pub const Searcher = struct {
             tte.reader.?.usable(alpha, beta))
             return tte.reader.?.val.score;
 
-        const static = if (tte_fine) tte.reader.?.val.eval else self.nn.output(self.b.side);
+        const static = if (tte_fine) tte.reader.?.val.eval else self.evaluate();
         const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
             tte.reader.?.val.score
         else
@@ -213,11 +220,11 @@ pub const Searcher = struct {
             }
 
             const undo = self.b.apply(move);
-            self.nn.move(self.b, move, undo);
+            self.nnw.move(self.b, move, undo);
 
             const score = -try self.quietSearch(-beta, -alpha);
 
-            self.nn.remove(self.b, move, undo);
+            self.nnw.remove(self.b, move, undo);
             self.b.remove(move, undo);
 
             if (score > bestScore) {
@@ -293,7 +300,7 @@ pub const Searcher = struct {
             tte.reader.?.usable(alpha, beta))
             return tte.reader.?.val.score;
 
-        const static = if (tte_fine) tte.reader.?.val.eval else self.nn.output(self.b.side);
+        const static = if (tte_fine) tte.reader.?.val.eval else self.evaluate();
         const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
             tte.reader.?.val.score
         else
@@ -365,11 +372,11 @@ pub const Searcher = struct {
                     stage = pick.stage;
 
                     const undo = self.b.apply(move);
-                    self.nn.move(self.b, move, undo);
+                    self.nnw.move(self.b, move, undo);
 
                     var score = -try self.quietSearch(-probcut_beta, -probcut_beta + 1);
 
-                    self.nn.remove(self.b, move, undo);
+                    self.nnw.remove(self.b, move, undo);
                     self.b.remove(move, undo);
 
                     if (score >= probcut_beta)
@@ -420,7 +427,7 @@ pub const Searcher = struct {
             stage = pick.stage;
 
             const undo = self.b.apply(move);
-            self.nn.move(self.b, move, undo);
+            self.nnw.move(self.b, move, undo);
 
             var score: i32 = undefined;
             var next_depth = depth - 1;
@@ -471,7 +478,7 @@ pub const Searcher = struct {
             if (pv and (move_counter == 0 or score > alpha))
                 score = -try self.search(-beta, -alpha, next_depth, false);
 
-            self.nn.remove(self.b, move, undo);
+            self.nnw.remove(self.b, move, undo);
             self.b.remove(move, undo);
 
             try histories.append(move);

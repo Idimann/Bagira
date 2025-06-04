@@ -8,6 +8,8 @@ pub const Mate = struct {
 
 pub const Openings = struct {
     pub const caro_kann = "r2qkbnr/pp1nppp1/2p5/3pPbBp/3P3P/8/PPP2PP1/RN1QKBNR w KQkq - 0 1";
+    pub const queen_gambit = "rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR b KQkq - 0 1";
+    pub const king_pawn = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 1";
 };
 
 pub const Middlegames = struct {
