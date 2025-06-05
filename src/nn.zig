@@ -7,7 +7,7 @@ const QA: i16 = 255;
 const QB: i16 = 64;
 
 const InputSize = 768;
-const AccumSize = 256;
+const AccumSize = 1024;
 
 const Net = extern struct {
     acc_weights: [InputSize][AccumSize]i16,
@@ -82,6 +82,26 @@ pub const NN = struct {
         }
     }
 
+    inline fn accumAddSub(
+        self: *NN,
+        from: tp.Square,
+        to: tp.Square,
+        typ: tp.PieceType,
+        side: bo.Side,
+    ) void {
+        const index_wf = calcIndex(.White, from, typ, side);
+        const index_bf = calcIndex(.Black, from, typ, side);
+        const index_wt = calcIndex(.White, to, typ, side);
+        const index_bt = calcIndex(.Black, to, typ, side);
+
+        for (0..AccumSize) |i| {
+            self.accum_w[i] -= self.network.acc_weights[index_wf][i];
+            self.accum_b[i] -= self.network.acc_weights[index_bf][i];
+            self.accum_w[i] += self.network.acc_weights[index_wt][i];
+            self.accum_b[i] += self.network.acc_weights[index_bt][i];
+        }
+    }
+
     pub inline fn inputAccum(self: *NN, b: *const bo.Board) void {
         self.accum_w = std.mem.zeroes([AccumSize]i16);
         self.accum_b = std.mem.zeroes([AccumSize]i16);
@@ -102,14 +122,12 @@ pub const NN = struct {
         switch (m.typ) {
             .Normal => {
                 const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, typ, b.side.getOther());
+                self.accumAddSub(m.from, m.to, typ, b.side.getOther());
                 if (undo.typ) |t| self.accumSub(m.to, t, b.side);
             },
             .EnPassant => {
                 const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, typ, b.side.getOther());
+                self.accumAddSub(m.from, m.to, typ, b.side.getOther());
                 if (b.side == .White)
                     self.accumSub(m.to.getApply(.North), .Pawn, b.side)
                 else
@@ -117,8 +135,7 @@ pub const NN = struct {
             },
             .CastleKingside => {
                 const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, typ, b.side.getOther());
+                self.accumAddSub(m.from, m.to, typ, b.side.getOther());
                 if (b.side == .White) {
                     self.accumSub(.h8, .Rook, .Black);
                     self.accumAdd(.f8, .Rook, .Black);
@@ -129,8 +146,7 @@ pub const NN = struct {
             },
             .CastleQueenside => {
                 const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, typ, b.side.getOther());
+                self.accumAddSub(m.from, m.to, typ, b.side.getOther());
                 if (b.side == .White) {
                     self.accumSub(.a8, .Rook, .Black);
                     self.accumAdd(.d8, .Rook, .Black);

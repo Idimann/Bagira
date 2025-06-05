@@ -12,8 +12,8 @@ pub fn main() !void {
     tab.initDiags();
     try zbr.init();
 
-    var nnw = try nn.NN.init("networks/", "first.bin");
-
+    var nnw = try nn.NN.init("networks/", "v1024_1.bin");
     var b = try bo.Board.fromFen(pos.start);
-    try pl.play(&b, &nnw, .White, 2000, false);
+
+    try pl.play(&b, &nnw, .Black, 5000, false);
 }

@@ -371,6 +371,11 @@ pub const MoveType = enum(u3) {
     PromBishop,
     PromRook,
     PromQueen,
+
+    pub inline fn promotion(self: MoveType) bool {
+        return self == .PromKnight or self == .PromBishop or
+            self == .PromRook or self == .PromQueen;
+    }
 };
 pub const Move = packed struct {
     from: Square,

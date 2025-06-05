@@ -41,6 +41,7 @@ pub const Searcher = struct {
     b: *bo.Board,
     nnw: *nn.NN,
     stack: []History,
+    excluded: ?tp.Move,
     start_ply: u12,
     pv_exists: bool,
     thread: *po.Thread,
@@ -66,6 +67,7 @@ pub const Searcher = struct {
             .b = &thread.board,
             .nnw = &thread.nnw,
             .stack = stack,
+            .excluded = null,
             .start_ply = thread.board.hash_in,
             .pv_exists = false,
             .thread = thread,
@@ -133,15 +135,19 @@ pub const Searcher = struct {
         return -MateVal + @as(i32, ply);
     }
 
+    inline fn isLoss(val: i32) bool {
+        const mate = mateVal(std.math.maxInt(u12));
+        return val <= mate;
+    }
+
     pub inline fn isMate(val: i32) bool {
         const mate = mateVal(std.math.maxInt(u12));
         return val <= mate or val >= -mate;
     }
 
     inline fn evaluate(self: *Searcher) i32 {
-        // const score = ev.eval(self.b);
         const score = self.nnw.output(self.b.side);
-        return ev.adjust(score, self.b);
+        return std.math.clamp(ev.adjust(score, self.b), -MateVal + 1, MateVal - 1);
     }
 
     pub fn quietSearch(self: *Searcher, a: i32, b: i32) !i32 {
@@ -182,7 +188,13 @@ pub const Searcher = struct {
             static;
         self.stack[ply].static = static;
 
-        if (eval >= alpha) alpha = eval;
+        if (eval >= alpha) {
+            alpha = eval;
+            if (pv) {
+                self.stack[ply].pv_size = 0;
+                self.stack[ply + 1].pv_size = 0;
+            }
+        }
         if (alpha >= beta) return alpha;
 
         var pick = pi.Picker.init(.QuietTT, self, &gen, tte);
@@ -192,7 +204,7 @@ pub const Searcher = struct {
 
         var bestMove: ?tp.Move = null;
         var bestScore = alpha;
-        var foundMove = false;
+        var move_counter: u8 = 0;
 
         // Removing killer move
         self.stack[ply].killer = null;
@@ -207,12 +219,16 @@ pub const Searcher = struct {
             self.stack[ply].move = move;
 
             stage = pick.stage;
-            foundMove = true;
 
             // Pruning, only if not in check
-            if (!inCheck) {
+            if (!isLoss(alpha) and !inCheck and !move.typ.promotion()) {
+                // Move count pruning
+                if (move_counter >= 2) continue;
+
                 // Futility pruning
-                if (self.b.w_pieces.check(move.to) or self.b.b_pieces.check(move.to)) {
+                const capture = self.b.w_pieces.check(move.to) or
+                    self.b.b_pieces.check(move.to);
+                if (capture) {
                     if (futility +
                         PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
                         continue;
@@ -227,6 +243,7 @@ pub const Searcher = struct {
             self.nnw.remove(self.b, move, undo);
             self.b.remove(move, undo);
 
+            move_counter += 1;
             if (score > bestScore) {
                 bestScore = score;
 
@@ -234,10 +251,10 @@ pub const Searcher = struct {
                     alpha = score;
                     bestMove = move;
 
-                    // if (pv) {
-                    //     self.updatePv(move);
-                    //     self.stack[ply + 1].pv_size = 0;
-                    // }
+                    if (pv) {
+                        self.updatePv(move);
+                        self.stack[ply + 1].pv_size = 0;
+                    }
 
                     if (score >= beta) break;
                 }
@@ -245,7 +262,7 @@ pub const Searcher = struct {
         }
 
         // Check and stalemate
-        if (!foundMove and inCheck) return mateVal(ply);
+        if (move_counter == 0 and inCheck) return mateVal(ply);
 
         // TT insert
         tt.store(
@@ -319,13 +336,14 @@ pub const Searcher = struct {
         if (!inCheck and
             !root and
             !pv and
+            self.excluded == null and
             self.stack[ply - 1].move != null and
             !isMate(beta))
         {
             if (!tte_move) {
                 const futility = beta + ev.CentiPawn * 13 *
                     @divFloor(depth - @intFromBool(improving), 2);
-                const razor = if (isMate(alpha))
+                const razor = if (isLoss(alpha))
                     alpha
                 else
                     alpha - ev.CentiPawn * 11 * depth * depth;
@@ -387,7 +405,7 @@ pub const Searcher = struct {
                             !cutnode,
                         );
 
-                    if (score >= probcut_beta) return if (isMate(score))
+                    if (score >= probcut_beta) return if (isLoss(score))
                         score
                     else
                         score - probcut_add;
@@ -421,27 +439,60 @@ pub const Searcher = struct {
 
         var stage = pick.stage;
         while (try pick.nextMove()) |move| {
+            if (self.excluded != null and move.equals(self.excluded.?)) {
+                stage = pick.stage;
+                continue;
+            }
+
             self.stack[ply].stage = stage;
             self.stack[ply].hist_score = pick.current_hist;
             self.stack[ply].move = move;
             stage = pick.stage;
 
+            var next_depth = depth - 1;
+            var score: i32 = undefined;
+
+            // Extensions
+            var E: i12 = 0;
+            if (!root and self.excluded == null) {
+                // Singular extension
+                if (depth >= 6 + @as(i12, @intCast(@intFromBool(pv))) and
+                    self.stack[ply].stage == .TT and
+                    tte.reader.?.val.depth + 3 >= depth and
+                    tte.reader.?.val.typ == .Lower and
+                    !isMate(tte.reader.?.val.score))
+                {
+                    const pv_int: i32 = @intCast(@intFromBool(pv));
+                    const depth_int = @as(i32, @intCast(depth)) * (2 - pv_int);
+                    const sing = tte.reader.?.val.score - depth_int;
+
+                    self.excluded = move;
+                    score = try self.search(sing - 1, sing, @divFloor(next_depth, 2), cutnode);
+                    self.excluded = null;
+
+                    if (score < sing)
+                        E += 1
+                    else if (sing >= beta)
+                        return sing
+                    else if (tte.reader.?.val.score >= beta)
+                        E -= 3
+                    else if (cutnode)
+                        E -= 2;
+                }
+            }
+            next_depth += @max(E, -@divFloor(next_depth, 3));
+
             const undo = self.b.apply(move);
             self.nnw.move(self.b, move, undo);
-
-            var score: i32 = undefined;
-            var next_depth = depth - 1;
-
-            // Check extensions
-            if (!root and ply <= 10 and inCheck) next_depth += 1;
 
             const quiet = undo.typ == null;
 
             // Reductions
-            const min_count = @as(u3, @intFromBool(pv)) +
-                @as(u3, @intFromBool(!quiet)) +
-                @as(u3, @intFromBool(self.stack[ply].stage == .TT));
-            if (!isMate(bestScore) and !root and move_counter > min_count) {
+            if (next_depth > 1 and
+                !isLoss(bestScore) and
+                !root and
+                move_counter > 1)
+            {
                 var R: i12 = 0;
 
                 // LMR
@@ -466,7 +517,7 @@ pub const Searcher = struct {
                 if (improving) R -= 1;
 
                 if (R < 0) R = 0;
-                const r_depth = if (R >= next_depth) @min(next_depth, 1) else next_depth - R;
+                const r_depth = if (R >= next_depth) 1 else next_depth - R;
 
                 score = -try self.search(-alpha - 1, -alpha, r_depth, true);
 
@@ -531,7 +582,8 @@ pub const Searcher = struct {
     }
 
     pub fn aspiration(self: *Searcher, prev: i32, depth: i12) !i32 {
-        var delta = 10 + @as(i32, @intCast(@divTrunc(@abs(prev), @as(u32, ev.PawnBase))));
+        var delta = @divFloor(ev.CentiPawn, 2) +
+            @as(i32, @intCast(@divTrunc(@abs(prev), @as(u32, ev.PawnBase))));
         var alpha = prev - delta;
         var beta = prev + delta;
 

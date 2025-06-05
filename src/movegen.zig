@@ -86,23 +86,22 @@ pub const Maker = struct {
                 true
             else
                 false;
-            var hit = if (self.b.side == .White)
+            var hit = (if (self.b.side == .White)
                 ta.PawnAttacksWhite[@intFromEnum(sq)].op_and(self.dat.their)
             else
-                ta.PawnAttacksBlack[@intFromEnum(sq)].op_and(self.dat.their);
+                ta.PawnAttacksBlack[@intFromEnum(sq)].op_and(self.dat.their))
+                .op_and(self.al);
             while (hit.popLsb()) |to| {
                 if (p == .Diag and diag_pin != (to.diagonal() == sq.diagonal())) continue;
 
-                if (self.al.check(to)) {
-                    if (to.rank() == prom_rank) {
-                        try list.appendSlice(&[_]tp.Move{
-                            .{ .from = sq, .to = to, .typ = .PromKnight },
-                            .{ .from = sq, .to = to, .typ = .PromBishop },
-                            .{ .from = sq, .to = to, .typ = .PromRook },
-                            .{ .from = sq, .to = to, .typ = .PromQueen },
-                        });
-                    } else try list.append(.{ .from = sq, .to = to, .typ = .Normal });
-                }
+                if (to.rank() == prom_rank) {
+                    try list.appendSlice(&[_]tp.Move{
+                        .{ .from = sq, .to = to, .typ = .PromKnight },
+                        .{ .from = sq, .to = to, .typ = .PromBishop },
+                        .{ .from = sq, .to = to, .typ = .PromRook },
+                        .{ .from = sq, .to = to, .typ = .PromQueen },
+                    });
+                } else try list.append(.{ .from = sq, .to = to, .typ = .Normal });
             }
 
             const en_passant = (if (self.b.side == .White)
@@ -111,12 +110,11 @@ pub const Maker = struct {
                 ta.PawnAttacksBlack[@intFromEnum(sq)])
                 .op_and(self.b.pawns)
                 .without(self.dat.our)
-                .without(self.dat.their);
+                .without(self.dat.their)
+                .op_and(self.al);
             if (en_passant.lsb()) |to| {
-                if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal())) {
-                    if (self.al.check(to))
-                        try list.append(.{ .from = sq, .to = to, .typ = .EnPassant });
-                }
+                if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal()))
+                    try list.append(.{ .from = sq, .to = to, .typ = .EnPassant });
             }
         }
     }
@@ -127,6 +125,8 @@ pub const Maker = struct {
         p: PinState,
         mv: tp.Move,
     ) bool {
+        if (mv.from != sq) return false;
+
         const next = if (self.b.side == .White) sq.getApply(.North) else sq.getApply(.South);
 
         const prom_rank = if (self.b.side == .White) tp.Rank.Rank8 else tp.Rank.Rank1;
@@ -135,7 +135,6 @@ pub const Maker = struct {
         if (p != .Diag and (p != .Line or sq.rank() != self.dat.our_king.rank())) {
             // Main squares
             if (!self.dat.combi.check(next)) {
-                const move = tp.Move{ .from = sq, .to = next, .typ = .Normal };
                 const next2 = if (self.b.side == .White)
                     sq.getApplySafe(.NorthNorth)
                 else
@@ -144,44 +143,39 @@ pub const Maker = struct {
                     next2 != null and
                     !self.dat.combi.check(next2.?))
                 {
-                    const move2 = tp.Move{ .from = sq, .to = next2.?, .typ = .Normal };
-
-                    if (self.al.check(next) and mv.equals(move)) return true;
-                    if (self.al.check(next2.?) and mv.equals(move2)) return true;
+                    if (self.al.check(next) and mv.to == next) return true;
+                    if (self.al.check(next2.?) and mv.to == next2) return true;
                 } else {
                     if (self.al.check(next)) {
                         if (next.rank() == prom_rank) {
                             if (mv.typ == .PromKnight or mv.typ == .PromBishop or
                                 mv.typ == .PromRook or mv.typ == .PromQueen)
                             {
-                                if (mv.from == sq and mv.to == next) return true;
+                                if (mv.to == next) return true;
                             }
-                        } else if (mv.equals(move)) return true;
+                        } else if (mv.to == next) return true;
                     }
                 }
             }
         }
 
         if (p != .Line) {
-            const diag_pin = if (sq.diagonal() == self.dat.our_king.diagonal())
-                true
-            else
-                false;
-            var hit = if (self.b.side == .White)
+            const diag_pin = sq.diagonal() == self.dat.our_king.diagonal();
+            const hit = (if (self.b.side == .White)
                 ta.PawnAttacksWhite[@intFromEnum(sq)].op_and(self.dat.their)
             else
-                ta.PawnAttacksBlack[@intFromEnum(sq)].op_and(self.dat.their);
-            while (hit.popLsb()) |to| {
-                if (p == .Diag and diag_pin != (to.diagonal() == sq.diagonal())) continue;
-
-                if (self.al.check(to)) {
+                ta.PawnAttacksBlack[@intFromEnum(sq)].op_and(self.dat.their))
+                .op_and(self.al)
+                .op_and(mv.to.toBoard());
+            if (hit.lsb()) |to| {
+                if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal())) {
                     if (to.rank() == prom_rank) {
                         if (mv.typ == .PromKnight or mv.typ == .PromBishop or
                             mv.typ == .PromRook or mv.typ == .PromQueen)
                         {
-                            if (mv.from == sq and mv.to == to) return true;
+                            if (mv.to == to) return true;
                         }
-                    } else if (mv.equals(.{ .from = sq, .to = to, .typ = .Normal }))
+                    } else if (mv.to == to)
                         return true;
                 }
             }
@@ -193,13 +187,12 @@ pub const Maker = struct {
                     ta.PawnAttacksBlack[@intFromEnum(sq)])
                     .op_and(self.b.pawns)
                     .without(self.dat.our)
-                    .without(self.dat.their);
+                    .without(self.dat.their)
+                    .op_and(self.al)
+                    .op_and(mv.to.toBoard());
                 if (en_passant.lsb()) |to| {
-                    if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal())) {
-                        if (self.al.check(to) and
-                            mv.equals(.{ .from = sq, .to = to, .typ = .EnPassant }))
+                    if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal()))
                             return true;
-                    }
                 }
             }
         }
@@ -231,13 +224,11 @@ pub const Maker = struct {
         mv: tp.Move,
     ) bool {
         if (mv.from != sq) return false;
-        var iter = ta.KingAttacks[@intFromEnum(sq)].without(self.dat.our);
+        const iter = ta.KingAttacks[@intFromEnum(sq)]
+            .without(self.dat.our)
+            .op_and(mv.to.toBoard());
 
-        while (iter.popLsb()) |to| {
-            if (self.attack_count(to, self.dat.our_king) == 0 and mv.to == to)
-                return true;
-        }
-
+        if (iter.lsb()) |to| return self.attack_count(to, self.dat.our_king) == 0;
         return false;
     }
 
@@ -271,8 +262,10 @@ pub const Maker = struct {
     ) bool {
         if (mv.from != sq) return false;
 
-        const iter = ta.KnightAttacks[@intFromEnum(sq)].without(self.dat.our);
-        return p == .None and iter.op_and(self.al).op_and(mv.to.toBoard()).v != 0;
+        const iter = ta.KnightAttacks[@intFromEnum(sq)]
+            .without(self.dat.our)
+            .op_and(mv.to.toBoard());
+        return p == .None and iter.op_and(self.al).v != 0;
     }
 
     inline fn genLine(
@@ -312,21 +305,16 @@ pub const Maker = struct {
         mv: tp.Move,
     ) bool {
         if (p != .Diag) {
-            var iter = ta.getLine(sq, self.dat.combi)
+            const iter = ta.getLine(sq, self.dat.combi)
                 .without(self.dat.our)
+                .op_and(mv.to.toBoard())
                 .op_and(self.al);
             if (p == .Line) {
                 const rank_pin = if (sq.rank() == self.dat.our_king.rank()) true else false;
-                while (iter.popLsb()) |to| {
-                    if (rank_pin != (to.rank() == sq.rank())) continue;
-
-                    if (mv.to == to) return true;
+                if (iter.lsb()) |to| {
+                    if (rank_pin == (to.rank() == sq.rank())) return true;
                 }
-            } else {
-                while (iter.popLsb()) |to| {
-                    if (mv.to == to) return true;
-                }
-            }
+            } else return iter.lsb() != null;
         }
 
         return false;
@@ -372,24 +360,16 @@ pub const Maker = struct {
         mv: tp.Move,
     ) bool {
         if (p != .Line) {
-            var iter = ta.getDiag(sq, self.dat.combi)
+            const iter = ta.getDiag(sq, self.dat.combi)
                 .without(self.dat.our)
+                .op_and(mv.to.toBoard())
                 .op_and(self.al);
             if (p == .Diag) {
-                const diag_pin = if (sq.diagonal() == self.dat.our_king.diagonal())
-                    true
-                else
-                    false;
-                while (iter.popLsb()) |to| {
-                    if (diag_pin != (to.diagonal() == sq.diagonal())) continue;
-
-                    if (mv.to == to) return true;
+                const diag_pin = sq.diagonal() == self.dat.our_king.diagonal();
+                if (iter.lsb()) |to| {
+                    if (diag_pin == (to.diagonal() == sq.diagonal())) return true;
                 }
-            } else {
-                while (iter.popLsb()) |to| {
-                    if (mv.to == to) return true;
-                }
-            }
+            } else return iter.lsb() != null;
         }
 
         return false;

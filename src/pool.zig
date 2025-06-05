@@ -109,10 +109,8 @@ pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !Result {
         const better = Pool[i].val(worst_score) * @intFromBool(Pool[i].res.pv_size > 2) >
             best.val(worst_score) * @intFromBool(best.res.pv_size > 2);
 
-        // Make sure to pick the shortest mate
-        if (se.Searcher.isMate(best.res.score)) {
-            if (new_val > best_val) best = &Pool[i];
-        } else if (new_val > best_val or (new_val == best_val and better)) best = &Pool[i];
+        // Update the best thread
+        if (new_val > best_val or (new_val == best_val and better)) best = &Pool[i];
     }
 
     deinitPool();

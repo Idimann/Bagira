@@ -5,6 +5,7 @@ const mv = @import("movegen.zig");
 const po = @import("pool.zig");
 const se = @import("search.zig");
 const nn = @import("nn.zig");
+const ev = @import("eval.zig");
 
 pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
     if (dep == 0) {
@@ -102,7 +103,11 @@ pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool
             if (se.Searcher.isMate(best.score)) {
                 const len = @divFloor(best.depth + 1, 2);
                 std.debug.print(" => Mate in {}\n", .{len});
-            } else std.debug.print(" => Depth: {}, Eval: {}\n", .{ best.depth, best.score });
+            } else {
+                const score = @as(f32, @floatFromInt(best.score)) /
+                    @as(f32, @floatFromInt(ev.PawnBase));
+                std.debug.print(" => Depth: {}, Eval: {d:.3}\n", .{ best.depth, score });
+            }
         } else {
             const gen = mv.Maker.init(b);
             if (gen.checks > 0)
@@ -133,7 +138,11 @@ pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64, minimal: bool) !void {
         if (se.Searcher.isMate(best.score)) {
             const len = @divFloor(best.depth + 1, 2);
             std.debug.print(" => Mate in {}\n", .{len});
-        } else std.debug.print(" => Depth: {}, Eval: {}\n", .{ best.depth, best.score });
+        } else {
+            const score = @as(f32, @floatFromInt(best.score)) /
+                @as(f32, @floatFromInt(ev.PawnBase));
+            std.debug.print(" => Depth: {}, Eval: {d:.3}\n", .{ best.depth, score });
+        }
     } else {
         const gen = mv.Maker.init(b);
         if (gen.checks > 0) {

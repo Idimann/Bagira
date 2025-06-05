@@ -17,6 +17,4 @@ pub const Middlegames = struct {
         "r3k2r/1bppqppp/p1n2n2/1p2p1B1/1b2P3/1BNP1N2/PPP1QPPP/R3K2R b KQkq - 0 1";
 };
 
-pub const Endgames = struct {
-    pub const simple_two_rooks = "8/2r3k1/8/4R3/6K1/8/8/8 w - - 0 1";
-};
+pub const Endgames = struct {};
