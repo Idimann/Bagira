@@ -5,7 +5,7 @@ pub var SideHash: u64 = 0;
 pub var CastleTable = std.mem.zeroes([4]u64);
 
 pub fn init() !void {
-    var prng = std.rand.DefaultPrng.init(blk: {
+    var prng = std.Random.DefaultPrng.init(blk: {
         var seed: u64 = undefined;
         try std.posix.getrandom(std.mem.asBytes(&seed));
         break :blk seed;

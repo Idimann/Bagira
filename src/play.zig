@@ -8,9 +8,7 @@ const nn = @import("nn.zig");
 const ev = @import("eval.zig");
 
 pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
-    if (dep == 0) {
-        return 1;
-    }
+    if (dep == 0) return 1;
 
     var list = std.ArrayList(tp.Move).init(alloc);
 
@@ -41,6 +39,76 @@ pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     for (list.items) |mov| {
         const undo = b.apply(mov);
         const res = try perft(b, dep - 1, alloc);
+        mov.print();
+        std.debug.print(": {}\n", .{res});
+        b.remove(mov, undo);
+
+        total += res;
+    }
+    std.debug.print("Total: {}\n", .{total});
+
+    list.deinit();
+}
+
+inline fn rand_move() !tp.Move {
+    var prng = std.Random.DefaultPrng.init(blk: {
+        var seed: u64 = undefined;
+        try std.posix.getrandom(std.mem.asBytes(&seed));
+        break :blk seed;
+    });
+    const rand = prng.random();
+
+    return .{
+        .from = @enumFromInt(rand.int(u6)),
+        .to = @enumFromInt(rand.int(u6)),
+        .typ = @enumFromInt(rand.int(u3)),
+    };
+}
+
+pub fn legals(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
+    if (dep == 0) return 0;
+
+    var list = std.ArrayList(tp.Move).init(alloc);
+
+    const maker = mv.Maker.init(b);
+    try maker.gen(&list, .Either);
+    try maker.gen(&list, .Castle);
+
+    var ret: usize = 0;
+    var random = std.mem.zeroes(tp.Move);
+    while (!maker.isLegal(random)) random = try rand_move();
+    // random.print();
+    // std.debug.print("\n", .{});
+
+    var found = false;
+    for (list.items) |mov| {
+        if (mov.equals(random)) found = true;
+
+        if (!maker.isLegal(mov)) ret += 1;
+
+        const undo = b.apply(mov);
+        const res = try legals(b, dep - 1, alloc);
+        ret += res;
+        b.remove(mov, undo);
+    }
+
+    if (!found) ret += 1;
+
+    list.deinit();
+    return ret;
+}
+
+pub fn legals_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
+    var list = std.ArrayList(tp.Move).init(alloc);
+
+    const maker = mv.Maker.init(b);
+    try maker.gen(&list, .Either);
+    try maker.gen(&list, .Castle);
+
+    var total: usize = 0;
+    for (list.items) |mov| {
+        const undo = b.apply(mov);
+        const res = try legals(b, dep - 1, alloc);
         mov.print();
         std.debug.print(": {}\n", .{res});
         b.remove(mov, undo);
@@ -121,8 +189,8 @@ pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool
     try play(b, nnw, player, time, minimal);
 }
 
-pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64, minimal: bool) !void {
-    const best = try po.bestMove(b, if (b.side == .White) time1 else time2);
+pub fn selfPlay(b: *bo.Board, nnw: *nn.NN, time: i64, minimal: bool) !void {
+    const best = try po.bestMove(b, nnw, time);
     if (best.depth != 0) {
         _ = b.apply(best.pv[0]);
         if (!minimal) {
@@ -155,5 +223,5 @@ pub fn selfPlay(b: *bo.Board, time1: i64, time2: i64, minimal: bool) !void {
         return;
     }
 
-    try selfPlay(b, time1, time2, minimal);
+    try selfPlay(b, nnw, time, minimal);
 }

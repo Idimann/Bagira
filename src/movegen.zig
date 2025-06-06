@@ -108,9 +108,7 @@ pub const Maker = struct {
                 ta.PawnAttacksWhite[@intFromEnum(sq)]
             else
                 ta.PawnAttacksBlack[@intFromEnum(sq)])
-                .op_and(self.b.pawns)
-                .without(self.dat.our)
-                .without(self.dat.their)
+                .op_and(self.b.enPassant())
                 .op_and(self.al);
             if (en_passant.lsb()) |to| {
                 if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal()))
@@ -132,7 +130,11 @@ pub const Maker = struct {
         const prom_rank = if (self.b.side == .White) tp.Rank.Rank8 else tp.Rank.Rank1;
         const double_rank = if (self.b.side == .White) tp.Rank.Rank2 else tp.Rank.Rank7;
 
-        if (p != .Diag and (p != .Line or sq.rank() != self.dat.our_king.rank())) {
+        if (mv.typ.promotion() and mv.to.rank() != prom_rank) return false;
+
+        if (mv.typ != .EnPassant and
+            p != .Diag and (p != .Line or sq.rank() != self.dat.our_king.rank()))
+        {
             // Main squares
             if (!self.dat.combi.check(next)) {
                 const next2 = if (self.b.side == .White)
@@ -153,7 +155,7 @@ pub const Maker = struct {
                             {
                                 if (mv.to == next) return true;
                             }
-                        } else if (mv.to == next) return true;
+                        } else if (mv.to == next and mv.typ == .Normal) return true;
                     }
                 }
             }
@@ -161,38 +163,38 @@ pub const Maker = struct {
 
         if (p != .Line) {
             const diag_pin = sq.diagonal() == self.dat.our_king.diagonal();
-            const hit = (if (self.b.side == .White)
-                ta.PawnAttacksWhite[@intFromEnum(sq)].op_and(self.dat.their)
-            else
-                ta.PawnAttacksBlack[@intFromEnum(sq)].op_and(self.dat.their))
-                .op_and(self.al)
-                .op_and(mv.to.toBoard());
-            if (hit.lsb()) |to| {
-                if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal())) {
-                    if (to.rank() == prom_rank) {
-                        if (mv.typ == .PromKnight or mv.typ == .PromBishop or
-                            mv.typ == .PromRook or mv.typ == .PromQueen)
-                        {
-                            if (mv.to == to) return true;
-                        }
-                    } else if (mv.to == to)
-                        return true;
-                }
-            }
 
             if (mv.typ == .EnPassant) {
                 const en_passant = (if (self.b.side == .White)
                     ta.PawnAttacksWhite[@intFromEnum(sq)]
                 else
                     ta.PawnAttacksBlack[@intFromEnum(sq)])
-                    .op_and(self.b.pawns)
-                    .without(self.dat.our)
-                    .without(self.dat.their)
+                    .op_and(self.b.enPassant())
                     .op_and(self.al)
                     .op_and(mv.to.toBoard());
                 if (en_passant.lsb()) |to| {
                     if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal()))
+                        return true;
+                }
+            } else {
+                const hit = (if (self.b.side == .White)
+                    ta.PawnAttacksWhite[@intFromEnum(sq)]
+                else
+                    ta.PawnAttacksBlack[@intFromEnum(sq)])
+                    .op_and(self.dat.their)
+                    .op_and(self.al)
+                    .op_and(mv.to.toBoard());
+                if (hit.lsb()) |to| {
+                    if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal())) {
+                        if (to.rank() == prom_rank) {
+                            if (mv.typ == .PromKnight or mv.typ == .PromBishop or
+                                mv.typ == .PromRook or mv.typ == .PromQueen)
+                            {
+                                if (mv.to == to) return true;
+                            }
+                        } else if (mv.to == to)
                             return true;
+                    }
                 }
             }
         }
@@ -381,7 +383,7 @@ pub const Maker = struct {
         lines: tp.BitBoard,
         diags: tp.BitBoard,
     };
-    fn attack_count_complex(self: *const Maker, sq: tp.Square) Attacks {
+    inline fn attack_count_complex(self: *const Maker, sq: tp.Square) Attacks {
         var ret: usize = 0;
         var hit = tp.BitBoard.new();
 
@@ -421,6 +423,58 @@ pub const Maker = struct {
         }
 
         return .{ .count = ret, .hitables = hit, .lines = line, .diags = diag };
+    }
+
+    pub inline fn attackers(self: *const Maker, sq: tp.Square) tp.BitBoard {
+        var ret = tp.BitBoard.new();
+
+        const kings = self.b.w_king.toBoard().op_or(self.b.b_king.toBoard());
+        ret = ret
+            .op_or(ta.KingAttacks[@intFromEnum(sq)]
+            .op_and(kings));
+
+        const knights = ta.KnightAttacks[@intFromEnum(sq)]
+            .without(self.b.pawns)
+            .without(self.b.lines)
+            .without(self.b.diags)
+            .without(kings);
+        ret = ret.op_or(knights);
+
+        const pawns = ta.PawnAttacksWhite[@intFromEnum(sq)]
+            .op_or(ta.PawnAttacksBlack[@intFromEnum(sq)])
+            .op_and(self.b.pawns);
+        ret = ret.op_or(pawns);
+
+        const line = ta.getLine(sq, self.dat.combi);
+        const diag = ta.getDiag(sq, self.dat.combi);
+        const line_hit = line.op_and(self.b.lines);
+        const diag_hit = diag.op_and(self.b.diags);
+        ret = ret.op_or(line_hit);
+        ret = ret.op_or(diag_hit);
+
+        return ret;
+    }
+
+    pub inline fn attackersDiag(
+        self: *const Maker,
+        sq: tp.Square,
+        combi: tp.BitBoard,
+    ) tp.BitBoard {
+        const diag = ta.getDiag(sq, combi);
+        const diag_hit = diag.op_and(self.b.diags).op_and(combi);
+
+        return diag_hit;
+    }
+
+    pub inline fn attackersLine(
+        self: *const Maker,
+        sq: tp.Square,
+        combi: tp.BitBoard,
+    ) tp.BitBoard {
+        const line = ta.getLine(sq, combi);
+        const line_hit = line.op_and(self.b.lines).op_and(combi);
+
+        return line_hit;
     }
 
     fn attack_count(self: *const Maker, sq: tp.Square, ig: tp.Square) usize {
@@ -477,10 +531,10 @@ pub const Maker = struct {
 
         var pin_line =
             ta.getLine(ret.dat.our_king, ret.dat.combi.without(pot_pinned_line))
-            .op_and(ret.dat.their).op_and(b.lines);
+                .op_and(ret.dat.their).op_and(b.lines);
         var pin_diag =
             ta.getDiag(ret.dat.our_king, ret.dat.combi.without(pot_pinned_diag))
-            .op_and(ret.dat.their).op_and(b.diags);
+                .op_and(ret.dat.their).op_and(b.diags);
 
         while (pin_line.popLsb()) |pin| {
             ret.pinned_line.v |= ta.getLine(pin, pot_pinned_line)
@@ -496,8 +550,12 @@ pub const Maker = struct {
     }
 
     pub inline fn isLegal(self: *const Maker, mv: tp.Move) bool {
-        if (self.b.side == .White and !self.b.w_pieces.check(mv.from)) return false;
-        if (self.b.side == .Black and !self.b.b_pieces.check(mv.from)) return false;
+        if (self.b.side == .White and
+            (!self.b.w_pieces.check(mv.from) or self.b.w_pieces.check(mv.to)))
+            return false;
+        if (self.b.side == .Black and
+            (!self.b.b_pieces.check(mv.from) or self.b.b_pieces.check(mv.to)))
+            return false;
 
         switch (mv.typ) {
             .Normal, .EnPassant, .PromKnight, .PromBishop, .PromRook, .PromQueen => {
@@ -505,11 +563,11 @@ pub const Maker = struct {
 
                 const pin_state: PinState =
                     if (self.pinned_line.check(sq))
-                    .Line
-                else if (self.pinned_diag.check(sq))
-                    .Diag
-                else
-                    .None;
+                        .Line
+                    else if (self.pinned_diag.check(sq))
+                        .Diag
+                    else
+                        .None;
 
                 if (self.dat.our_king == sq)
                     return mv.typ == .Normal and self.checkKing(sq, mv)
@@ -571,11 +629,11 @@ pub const Maker = struct {
             while (iter.popLsb()) |sq| {
                 const pin_state: PinState =
                     if (self.pinned_line.check(sq))
-                    .Line
-                else if (self.pinned_diag.check(sq))
-                    .Diag
-                else
-                    .None;
+                        .Line
+                    else if (self.pinned_diag.check(sq))
+                        .Diag
+                    else
+                        .None;
 
                 if (self.dat.our_king == sq)
                     try self.genKing(sq, list, typ)

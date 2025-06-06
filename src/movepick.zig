@@ -120,10 +120,10 @@ pub const Picker = struct {
                 if (self.list.items.len == 0)
                     self.stage = .Killer
                 else {
-                    const score = self.score_list.pop();
+                    const score = self.score_list.pop().?;
                     if (score < 0) self.stage = .Killer;
                     self.current_hist = score;
-                    const move = self.list.pop();
+                    const move = self.list.pop().?;
 
                     if ((self.tt == null or !self.tt.?.equals(move)) and
                         (self.killer == null or !self.killer.?.equals(move)))
@@ -147,8 +147,8 @@ pub const Picker = struct {
                 if (self.list.items.len == 0)
                     self.stage = .GenQuiets
                 else {
-                    self.current_hist = self.score_list.pop();
-                    const move = self.list.pop();
+                    self.current_hist = self.score_list.pop().?;
+                    const move = self.list.pop().?;
 
                     if ((self.tt == null or !self.tt.?.equals(move)) and
                         (self.killer == null or !self.killer.?.equals(move)))
@@ -174,8 +174,8 @@ pub const Picker = struct {
                 self.stage = .Quiets;
             },
             .Quiets => {
-                const move = self.list.popOrNull();
-                self.current_hist = self.score_list.popOrNull();
+                const move = self.list.pop();
+                self.current_hist = self.score_list.pop();
                 if (move == null) return move;
 
                 if ((self.tt == null or !self.tt.?.equals(move.?)) and
@@ -217,8 +217,8 @@ pub const Picker = struct {
                 self.stage = .Quiet;
             },
             .Quiet => {
-                const move = self.list.popOrNull();
-                self.current_hist = self.score_list.popOrNull();
+                const move = self.list.pop();
+                self.current_hist = self.score_list.pop();
                 if (move == null) return move;
 
                 if ((self.tt == null or !self.tt.?.equals(move.?)) and

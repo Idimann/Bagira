@@ -8,6 +8,7 @@ const tt = @import("tt.zig");
 const po = @import("pool.zig");
 const pi = @import("movepick.zig");
 const hi = @import("history.zig");
+const se = @import("see.zig");
 
 fn initReductions() [2][32][32]i12 {
     var ret = std.mem.zeroes([2][32][32]i12);
@@ -23,7 +24,22 @@ fn initReductions() [2][32][32]i12 {
 
     return ret;
 }
+
+fn initPrunes() [2][32]i32 {
+    var ret = std.mem.zeroes([2][32]i32);
+
+    for (1..32) |i| {
+        const depth: comptime_float = @floatFromInt(i);
+
+        ret[0][i] = @intFromFloat(-13.78 * depth * depth);
+        ret[1][i] = @intFromFloat(-108.35 * depth);
+    }
+
+    return ret;
+}
+
 const Reductions = initReductions();
+const Prunes = initPrunes();
 
 pub const MaxDepth = 255;
 const History = struct {
@@ -50,13 +66,6 @@ pub const Searcher = struct {
 
     // The division by 2 is for overflow protection
     pub const MateVal = std.math.maxInt(i32) >> 1;
-    const PieceValue = [_]i32{
-        ev.PawnBase,
-        ev.KnightBase,
-        ev.BishopBase,
-        ev.RookBase,
-        ev.QueenBase,
-    };
 
     pub fn init(thread: *po.Thread, alloc: std.mem.Allocator) !Searcher {
         const stack = try alloc.alloc(History, MaxDepth);
@@ -146,7 +155,7 @@ pub const Searcher = struct {
     }
 
     inline fn evaluate(self: *Searcher) i32 {
-        const score = self.nnw.output(self.b.side);
+        const score = self.nnw.output(self.b);
         return std.math.clamp(ev.adjust(score, self.b), -MateVal + 1, MateVal - 1);
     }
 
@@ -188,7 +197,7 @@ pub const Searcher = struct {
             static;
         self.stack[ply].static = static;
 
-        if (eval >= alpha) {
+        if (!inCheck and eval >= alpha) {
             alpha = eval;
             if (pv) {
                 self.stack[ply].pv_size = 0;
@@ -220,19 +229,19 @@ pub const Searcher = struct {
 
             stage = pick.stage;
 
-            // Pruning, only if not in check
-            if (!isLoss(alpha) and !inCheck and !move.typ.promotion()) {
-                // Move count pruning
-                if (move_counter >= 2) continue;
-
+            // Pruning
+            if (!isLoss(alpha) ) {
                 // Futility pruning
                 const capture = self.b.w_pieces.check(move.to) or
                     self.b.b_pieces.check(move.to);
-                if (capture) {
+                if (!inCheck and capture) {
                     if (futility +
-                        PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
+                        ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
                         continue;
                 }
+
+                // SEE Pruning
+                if (!se.see(self.b, move, &gen, 0)) continue;
             }
 
             const undo = self.b.apply(move);
@@ -421,7 +430,8 @@ pub const Searcher = struct {
             2 + depth_sq
         else
             @divFloor(depth_sq, 2);
-        const tt_capture = tte_move and !self.b.isQuiet(tte.reader.?.val.move);
+        const tt_capture = tte_move and (!self.b.isQuiet(tte.reader.?.val.move) or
+            tte.reader.?.val.move.typ.promotion());
 
         var bestMove: ?tp.Move = null;
         var bestScore: i32 = -MateVal;
@@ -439,11 +449,6 @@ pub const Searcher = struct {
 
         var stage = pick.stage;
         while (try pick.nextMove()) |move| {
-            if (self.excluded != null and move.equals(self.excluded.?)) {
-                stage = pick.stage;
-                continue;
-            }
-
             self.stack[ply].stage = stage;
             self.stack[ply].hist_score = pick.current_hist;
             self.stack[ply].move = move;
@@ -451,6 +456,44 @@ pub const Searcher = struct {
 
             var next_depth = depth - 1;
             var score: i32 = undefined;
+
+            const quiet = self.b.isQuiet(move);
+            var r_depth = next_depth;
+            if (!isLoss(bestScore)) {
+                var R: i12 = 0;
+                const depth_index: u5 = @intCast(@min(31, depth));
+                const ply_index: u5 = @intCast(@min(31, ply));
+                R += Reductions[@intFromBool(quiet)][depth_index][ply_index];
+                if (pick.current_hist) |h|
+                    R -= @intCast(std.math.clamp(@divFloor(h, hi.CentiHist), -2, 2));
+
+                // Reduce more
+                if (cutnode) R += 2;
+                if (quiet and move_counter > quiet_count) R += 2;
+                if (tt_capture) R += 1;
+                if (!pv) R += 1;
+                if (!improving) R += 1;
+
+                // Reduce less
+                if (inCheck) R -= 1;
+                if (self.stack[ply].stage == .Killer) R -= 1;
+                if (R < 0) R = 0;
+
+                r_depth = if (R >= next_depth) 1 else next_depth - R;
+            }
+
+            // Skips
+            if (self.excluded != null and move.equals(self.excluded.?)) continue;
+            if (!isLoss(bestScore)) {
+                if (!se.see(
+                    self.b,
+                    move,
+                    &gen,
+                    Prunes[@intFromBool(quiet)][@intCast(r_depth)],
+                )) {
+                    continue;
+                }
+            }
 
             // Extensions
             var E: i12 = 0;
@@ -475,9 +518,11 @@ pub const Searcher = struct {
                     else if (sing >= beta)
                         return sing
                     else if (tte.reader.?.val.score >= beta)
-                        E -= 3
+                        E -= 3 - @as(i12, @intCast(@intFromBool(pv)))
                     else if (cutnode)
-                        E -= 2;
+                        E -= 2
+                    else if (tte.reader.?.val.score <= alpha)
+                        E -= 1;
                 }
             }
             next_depth += @max(E, -@divFloor(next_depth, 3));
@@ -485,40 +530,12 @@ pub const Searcher = struct {
             const undo = self.b.apply(move);
             self.nnw.move(self.b, move, undo);
 
-            const quiet = undo.typ == null;
-
-            // Reductions
+            // LMR
             if (next_depth > 1 and
                 !isLoss(bestScore) and
                 !root and
                 move_counter > 1)
             {
-                var R: i12 = 0;
-
-                // LMR
-                const depth_index: u5 = @intCast(@min(31, depth));
-                const ply_index: u5 = @intCast(@min(31, ply));
-                R += Reductions[@intFromBool(quiet)][depth_index][ply_index];
-                if (pick.current_hist) |h|
-                    R -= @intCast(std.math.clamp(@divFloor(h, hi.CentiHist), -2, 2));
-
-                if (cutnode) R += 2;
-
-                if (quiet and
-                    move_counter > quiet_count)
-                    R += 2;
-
-                if (tt_capture) R += 1;
-
-                // Various pruning reduction criteria
-                if (pv) R -= 1;
-                if (inCheck) R -= 1;
-                if (self.stack[ply].stage == .Killer) R -= 1;
-                if (improving) R -= 1;
-
-                if (R < 0) R = 0;
-                const r_depth = if (R >= next_depth) 1 else next_depth - R;
-
                 score = -try self.search(-alpha - 1, -alpha, r_depth, true);
 
                 if (score > alpha and r_depth < next_depth)
@@ -582,7 +599,7 @@ pub const Searcher = struct {
     }
 
     pub fn aspiration(self: *Searcher, prev: i32, depth: i12) !i32 {
-        var delta = @divFloor(ev.CentiPawn, 2) +
+        var delta = @divFloor(ev.CentiPawn * 2, depth) +
             @as(i32, @intCast(@divTrunc(@abs(prev), @as(u32, ev.PawnBase))));
         var alpha = prev - delta;
         var beta = prev + delta;

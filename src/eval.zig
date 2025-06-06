@@ -11,6 +11,13 @@ pub const KnightBase = CentiPawn * 31;
 pub const BishopBase = CentiPawn * 33;
 pub const RookBase = CentiPawn * 50;
 pub const QueenBase = CentiPawn * 95;
+pub const PieceValue = [_]i32{
+    PawnBase,
+    KnightBase,
+    BishopBase,
+    RookBase,
+    QueenBase,
+};
 
 pub inline fn adjust(input: i32, b: *const bo.Board) i32 {
     var ret = input;

@@ -75,6 +75,28 @@ pub const Board = struct {
         return !self.w_pieces.op_or(self.b_pieces).check(m.to);
     }
 
+    pub inline fn side_pieces(self: *const Board, side: Side) tp.BitBoard {
+        return if (side == .White) self.w_pieces else self.b_pieces;
+    }
+
+    pub inline fn type_pieces(self: *const Board, typ: tp.PieceType) tp.BitBoard {
+        const all = self.w_pieces.op_or(self.b_pieces);
+
+        return switch (typ) {
+            .Pawn => all.op_and(self.pawns),
+            .Knight => all
+                .without(self.pawns)
+                .without(self.lines)
+                .without(self.diags)
+                .without(self.w_king.toBoard())
+                .without(self.b_king.toBoard()),
+            .Bishop => all.op_and(self.diags).without(self.lines),
+            .Rook => all.op_and(self.lines).without(self.diags),
+            .Queen => all.op_and(self.lines).op_and(self.diags),
+            .King => all.op_and(self.w_king.toBoard().op_or(self.b_king.toBoard())),
+        };
+    }
+
     pub inline fn pieceType(self: *const Board, s: tp.Square) tp.PieceType {
         if (s == self.w_king or s == self.b_king) return .King;
         if (self.pawns.check(s)) return .Pawn;

@@ -7,13 +7,16 @@ const QA: i16 = 255;
 const QB: i16 = 64;
 
 const InputSize = 768;
-const AccumSize = 1024;
+const AccumSize = 512;
+
+const Buckets = 8;
+const BucketDivisor = @divFloor((32 + Buckets - 1), Buckets);
 
 const Net = extern struct {
     acc_weights: [InputSize][AccumSize]i16,
     acc_biases: [AccumSize]i16,
-    out_weights: [2 * AccumSize]i16,
-    out_bias: i16,
+    out_weights: [Buckets][2 * AccumSize]i16,
+    out_bias: [Buckets]i16,
 };
 pub const NN = struct {
     accum_w: [AccumSize]i16,
@@ -251,24 +254,31 @@ pub const NN = struct {
         }
     }
 
-    pub inline fn output(self: *NN, side: bo.Side) i32 {
+    inline fn chooseBucket(b: *const bo.Board) usize {
+        const pieces = b.w_pieces.op_or(b.b_pieces);
+
+        return @divFloor(pieces.popcount() - 2, BucketDivisor);
+    }
+
+    pub inline fn output(self: *NN, b: *const bo.Board) i32 {
         var ret: i32 = 0;
+        const bucket = chooseBucket(b);
 
         for (0..AccumSize) |i| {
-            if (side == .White) {
+            if (b.side == .White) {
                 ret += activation(self.accum_w[i]) *
-                    @as(i32, @intCast(self.network.out_weights[i]));
+                    @as(i32, @intCast(self.network.out_weights[bucket][i]));
                 ret += activation(self.accum_b[i]) *
-                    @as(i32, @intCast(self.network.out_weights[i + AccumSize]));
+                    @as(i32, @intCast(self.network.out_weights[bucket][i + AccumSize]));
             } else {
                 ret += activation(self.accum_w[i]) *
-                    @as(i32, @intCast(self.network.out_weights[i + AccumSize]));
+                    @as(i32, @intCast(self.network.out_weights[bucket][i + AccumSize]));
                 ret += activation(self.accum_b[i]) *
-                    @as(i32, @intCast(self.network.out_weights[i]));
+                    @as(i32, @intCast(self.network.out_weights[bucket][i]));
             }
         }
         ret = @divTrunc(ret, QA);
-        ret += @intCast(self.network.out_bias);
+        ret += @intCast(self.network.out_bias[bucket]);
 
         ret *= SCALE;
         ret = @divTrunc(ret, QA * QB);

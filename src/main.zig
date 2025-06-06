@@ -12,8 +12,10 @@ pub fn main() !void {
     tab.initDiags();
     try zbr.init();
 
-    var nnw = try nn.NN.init("networks/", "v1024_1.bin");
+    var nnw = try nn.NN.init("networks/", "v2_0.bin");
     var b = try bo.Board.fromFen(pos.start);
 
-    try pl.play(&b, &nnw, .Black, 5000, false);
+    // std.debug.print("{}\n", .{try pl.legals(&b, 1, std.heap.c_allocator)});
+    // try pl.legals_print(&b, 4, std.heap.c_allocator);
+    try pl.play(&b, &nnw, .Black, 1000, false);
 }
