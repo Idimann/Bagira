@@ -39,8 +39,19 @@ pub const TT_Entry = struct {
     }
 };
 
-const TT_Size = (25 << 20) / @sizeOf(TT_Entry);
-pub var TT = std.mem.zeroes([TT_Size]TT_Entry);
+var TT_Size: usize = 0;
+pub var TT: []TT_Entry = undefined;
+
+pub inline fn init(mbs: usize, alloc: std.mem.Allocator) !void {
+    TT_Size = @divExact(mbs * (1 << 20), @sizeOf(TT_Entry));
+    TT = try alloc.alloc(TT_Entry, TT_Size);
+    @memset(TT, std.mem.zeroes(TT_Entry));
+}
+
+pub inline fn deinit(alloc: std.mem.Allocator) void {
+    TT_Size = 0;
+    alloc.free(TT);
+}
 
 pub inline fn prefetch(b: *const bo.Board, comptime write: bool) void {
     if (write) @prefetch(&TT[b.hash[b.hash_in] % TT_Size], .{ .rw = .write });
