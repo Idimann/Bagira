@@ -183,16 +183,26 @@ pub const Searcher = struct {
         // TT Probe
         const tte = tt.probe(self.b);
         const tte_fine = tte.reader != null and tte.usable;
+        var tte_score = if (tte_fine) tte.reader.?.val.score else 0;
+
+        // Fix TT mate distance
+        if (tte_fine and isMate(tte_score)) {
+            if (isLoss(tte_score))
+                tte_score += ply
+            else
+                tte_score -= ply;
+        }
+
 
         // Trust the tt entry if it's usable
         if (!pv and
             tte_fine and
-            tte.reader.?.usable(alpha, beta))
-            return tte.reader.?.val.score;
+            tte.reader.?.usable(tte_score, alpha, beta))
+            return tte_score;
 
         const static = if (tte_fine) tte.reader.?.val.eval else self.evaluate();
-        const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
-            tte.reader.?.val.score
+        const eval = if (tte_fine and tte.reader.?.usable(tte_score, static - 1, static))
+            tte_score
         else
             static;
         self.stack[ply].static = static;
@@ -211,8 +221,8 @@ pub const Searcher = struct {
 
         const futility = eval + ev.CentiPawn * 11;
 
-        var bestMove: ?tp.Move = null;
-        var bestScore = alpha;
+        var best_move: ?tp.Move = null;
+        var best_score = alpha;
         var move_counter: u8 = 0;
 
         // Removing killer move
@@ -230,7 +240,7 @@ pub const Searcher = struct {
             stage = pick.stage;
 
             // Pruning
-            if (!isLoss(alpha) ) {
+            if (!isLoss(alpha)) {
                 // Futility pruning
                 const capture = self.b.w_pieces.check(move.to) or
                     self.b.b_pieces.check(move.to);
@@ -254,12 +264,12 @@ pub const Searcher = struct {
             self.b.remove(move, undo);
 
             move_counter += 1;
-            if (score > bestScore) {
-                bestScore = score;
+            if (score > best_score) {
+                best_score = score;
 
                 if (score > alpha) {
                     alpha = score;
-                    bestMove = move;
+                    best_move = move;
 
                     if (pv) {
                         self.updatePv(move);
@@ -275,19 +285,29 @@ pub const Searcher = struct {
         if (move_counter == 0 and inCheck) return mateVal(ply);
 
         // TT insert
+        var store_score = best_score;
+
+        // Fix inserting mate distance
+        if (isMate(store_score)) {
+            if (isLoss(store_score))
+                store_score -= ply
+            else
+                store_score += ply;
+        }
+
         tt.store(
             self.b,
-            bestScore,
+            store_score,
             static,
             0,
             lower_bound,
             upper_bound,
-            bestMove,
+            best_move,
             self.start_ply,
             tte,
         );
 
-        return bestScore;
+        return best_score;
     }
 
     pub fn search(self: *Searcher, a: i32, b: i32, dep: i12, cutnode: bool) !i32 {
@@ -318,18 +338,27 @@ pub const Searcher = struct {
         const tte = tt.probe(self.b);
         const tte_fine = tte.reader != null and tte.usable;
         const tte_move = tte_fine and tte.reader.?.val.typ != .Upper;
+        var tte_score = if (tte_fine) tte.reader.?.val.score else 0;
+
+        // Fix TT mate distance
+        if (tte_fine and isMate(tte_score)) {
+            if (isLoss(tte_score))
+                tte_score += ply
+            else
+                tte_score -= ply;
+        }
 
         // Trust the tt entry if it's usable
         if (!root and
             tte_fine and
             (!pv or (tte.reader.?.val.typ == .Exact)) and
             tte.reader.?.val.depth >= depth and
-            tte.reader.?.usable(alpha, beta))
-            return tte.reader.?.val.score;
+            tte.reader.?.usable(tte_score, alpha, beta))
+            return tte_score;
 
         const static = if (tte_fine) tte.reader.?.val.eval else self.evaluate();
-        const eval = if (tte_fine and tte.reader.?.usable(static - 1, static))
-            tte.reader.?.val.score
+        const eval = if (tte_fine and tte.reader.?.usable(tte_score, static - 1, static))
+            tte_score
         else
             static;
         self.stack[ply].static = static;
@@ -436,8 +465,8 @@ pub const Searcher = struct {
         const tt_capture = tte_move and (!self.b.isQuiet(tte.reader.?.val.move) or
             tte.reader.?.val.move.typ.promotion());
 
-        var bestMove: ?tp.Move = null;
-        var bestScore: i32 = -MateVal;
+        var best_move: ?tp.Move = null;
+        var best_score: i32 = -MateVal;
 
         var histories = try std.ArrayList(tp.Move).initCapacity(self.alloc, 64);
         defer histories.deinit();
@@ -462,7 +491,7 @@ pub const Searcher = struct {
 
             const quiet = self.b.isQuiet(move);
             var r_depth = next_depth;
-            if (!isLoss(bestScore)) {
+            if (!isLoss(best_score)) {
                 var R: i12 = 0;
                 const depth_index: u5 = @intCast(@min(31, depth));
                 const ply_index: u5 = @intCast(@min(31, ply));
@@ -487,7 +516,7 @@ pub const Searcher = struct {
 
             // Skips
             if (self.excluded != null and move.equals(self.excluded.?)) continue;
-            if (!isLoss(bestScore)) {
+            if (!isLoss(best_score)) {
                 if (!se.see(
                     self.b,
                     move,
@@ -506,11 +535,11 @@ pub const Searcher = struct {
                     self.stack[ply].stage == .TT and
                     tte.reader.?.val.depth + 3 >= depth and
                     tte.reader.?.val.typ == .Lower and
-                    !isMate(tte.reader.?.val.score))
+                    !isMate(tte_score))
                 {
                     const pv_int: i32 = @intCast(@intFromBool(pv));
                     const depth_int = @as(i32, @intCast(depth)) * (2 - pv_int);
-                    const sing = tte.reader.?.val.score - depth_int;
+                    const sing = tte_score - depth_int;
 
                     self.excluded = move;
                     score = try self.search(sing - 1, sing, @divFloor(next_depth, 2), cutnode);
@@ -520,11 +549,11 @@ pub const Searcher = struct {
                         E += 1
                     else if (sing >= beta)
                         return sing
-                    else if (tte.reader.?.val.score >= beta)
+                    else if (tte_score >= beta)
                         E -= 3 - @as(i12, @intCast(@intFromBool(pv)))
                     else if (cutnode)
                         E -= 2
-                    else if (tte.reader.?.val.score <= alpha)
+                    else if (tte_score <= alpha)
                         E -= 1;
                 }
             }
@@ -536,7 +565,7 @@ pub const Searcher = struct {
 
             // LMR
             if (next_depth > 1 and
-                !isLoss(bestScore) and
+                !isLoss(best_score) and
                 !root and
                 move_counter > 1)
             {
@@ -555,12 +584,12 @@ pub const Searcher = struct {
 
             try histories.append(move);
             move_counter += 1;
-            if (score > bestScore) {
-                bestScore = score;
+            if (score > best_score) {
+                best_score = score;
 
                 if (score > alpha) {
                     alpha = score;
-                    bestMove = move;
+                    best_move = move;
 
                     if (pv) {
                         self.updatePv(move);
@@ -587,19 +616,29 @@ pub const Searcher = struct {
         if (move_counter == 0) return if (inCheck) mateVal(ply) else drawVal();
 
         // TT insert
+        var store_score = best_score;
+
+        // Fix inserting mate distance
+        if (isMate(store_score)) {
+            if (isLoss(store_score))
+                store_score -= ply
+            else
+                store_score += ply;
+        }
+
         tt.store(
             self.b,
-            bestScore,
+            store_score,
             static,
             depth,
             lower_bound,
             upper_bound,
-            bestMove,
+            best_move,
             self.start_ply,
             tte,
         );
 
-        return bestScore;
+        return best_score;
     }
 
     pub fn aspiration(self: *Searcher, prev: i32, depth: i12) !i32 {

@@ -32,10 +32,10 @@ pub const TT_Entry = struct {
         return self.check == self.getCheck();
     }
 
-    pub inline fn usable(self: *const TT_Entry, alpha: i32, beta: i32) bool {
+    pub inline fn usable(self: *const TT_Entry, score: i32, alpha: i32, beta: i32) bool {
         return self.val.typ == .Exact or
-            (self.val.typ == .Lower and self.val.score >= beta) or
-            (self.val.typ == .Upper and self.val.score < alpha);
+            (self.val.typ == .Lower and score >= beta) or
+            (self.val.typ == .Upper and score < alpha);
     }
 };
 
