@@ -42,6 +42,11 @@ pub const TT_Entry = struct {
 const TT_Size = (25 << 20) / @sizeOf(TT_Entry);
 pub var TT = std.mem.zeroes([TT_Size]TT_Entry);
 
+pub inline fn prefetch(b: *const bo.Board, comptime write: bool) void {
+    if (write) @prefetch(&TT[b.hash[b.hash_in] % TT_Size], .{ .rw = .write });
+    @prefetch(&TT[b.hash[b.hash_in] % TT_Size], .{ .rw = .read });
+}
+
 pub const TT_Result = struct {
     reader: ?TT_Entry,
     usable: bool,

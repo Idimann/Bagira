@@ -246,6 +246,7 @@ pub const Searcher = struct {
 
             const undo = self.b.apply(move);
             self.nnw.move(self.b, move, undo);
+            tt.prefetch(self.b, false);
 
             const score = -try self.quietSearch(-beta, -alpha);
 
@@ -377,6 +378,7 @@ pub const Searcher = struct {
                 self.stack[ply].move = null;
 
                 const undo = self.b.applyNull();
+                tt.prefetch(self.b, false);
                 const score = -try self.search(-beta, -beta + 1, null_depth, !cutnode);
                 self.b.removeNull(undo);
 
@@ -400,6 +402,7 @@ pub const Searcher = struct {
 
                     const undo = self.b.apply(move);
                     self.nnw.move(self.b, move, undo);
+                    tt.prefetch(self.b, false);
 
                     var score = -try self.quietSearch(-probcut_beta, -probcut_beta + 1);
 
@@ -529,6 +532,7 @@ pub const Searcher = struct {
 
             const undo = self.b.apply(move);
             self.nnw.move(self.b, move, undo);
+            tt.prefetch(self.b, true);
 
             // LMR
             if (next_depth > 1 and
