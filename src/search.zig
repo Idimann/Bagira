@@ -59,7 +59,6 @@ pub const Searcher = struct {
     stack: []History,
     excluded: ?tp.Move,
     start_ply: u12,
-    pv_exists: bool,
     thread: *po.Thread,
 
     stats: hi.Stats,
@@ -78,7 +77,6 @@ pub const Searcher = struct {
             .stack = stack,
             .excluded = null,
             .start_ply = thread.board.hash_in,
-            .pv_exists = false,
             .thread = thread,
             .stats = hi.Stats.init(),
         };
@@ -178,13 +176,17 @@ pub const Searcher = struct {
         const gen = mv.Maker.init(self.b);
 
         const pv = b != a + 1;
-        const inCheck = gen.checks > 0;
+        const in_check = gen.checks > 0;
 
         // TT Probe
         const tte = tt.probe(self.b);
         const tte_fine = tte.reader != null and tte.usable;
+        const tte_move = tte_fine and tte.reader.?.val.typ != .Upper;
         var tte_score = if (tte_fine) tte.reader.?.val.score else 0;
-
+        const hash_move: ?tp.Move = if (tte_move)
+            tte.reader.?.val.move
+        else
+            null;
         // Fix TT mate distance
         if (tte_fine and isMate(tte_score)) {
             if (isLoss(tte_score))
@@ -192,7 +194,6 @@ pub const Searcher = struct {
             else
                 tte_score -= ply;
         }
-
 
         // Trust the tt entry if it's usable
         if (!pv and
@@ -207,7 +208,7 @@ pub const Searcher = struct {
             static;
         self.stack[ply].static = static;
 
-        if (!inCheck and eval >= alpha) {
+        if (!in_check and eval >= alpha) {
             alpha = eval;
             if (pv) {
                 self.stack[ply].pv_size = 0;
@@ -216,7 +217,7 @@ pub const Searcher = struct {
         }
         if (alpha >= beta) return alpha;
 
-        var pick = pi.Picker.init(.QuietTT, self, &gen, tte);
+        var pick = pi.Picker.init(.QuietTT, self, &gen, hash_move);
         defer pick.deinit();
 
         const futility = eval + ev.CentiPawn * 11;
@@ -244,7 +245,7 @@ pub const Searcher = struct {
                 // Futility pruning
                 const capture = self.b.w_pieces.check(move.to) or
                     self.b.b_pieces.check(move.to);
-                if (!inCheck and capture) {
+                if (!in_check and capture) {
                     if (futility +
                         ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
                         continue;
@@ -282,7 +283,7 @@ pub const Searcher = struct {
         }
 
         // Check and stalemate
-        if (move_counter == 0 and inCheck) return mateVal(ply);
+        if (move_counter == 0 and in_check) return mateVal(ply);
 
         // TT insert
         var store_score = best_score;
@@ -330,15 +331,22 @@ pub const Searcher = struct {
 
         const gen = mv.Maker.init(self.b);
 
-        const inCheck = gen.checks > 0;
+        const in_check = gen.checks > 0;
         const pv = b != a + 1;
         const root = ply == 0;
+        self.thread.nodes += 1;
 
         // TT Probe
         const tte = tt.probe(self.b);
         const tte_fine = tte.reader != null and tte.usable;
         const tte_move = tte_fine and tte.reader.?.val.typ != .Upper;
         var tte_score = if (tte_fine) tte.reader.?.val.score else 0;
+        const hash_move: ?tp.Move = if (root)
+            self.thread.best_root.pv[0]
+        else if (tte_move)
+            tte.reader.?.val.move
+        else
+            null;
 
         // Fix TT mate distance
         if (tte_fine and isMate(tte_score)) {
@@ -362,7 +370,7 @@ pub const Searcher = struct {
         else
             static;
         self.stack[ply].static = static;
-        const improving = !inCheck and
+        const improving = !in_check and
             (ply <= 1 or static > self.stack[ply - 2].static);
 
         // This is taken from Weiss (it says it's taken from Rebel there)
@@ -372,7 +380,7 @@ pub const Searcher = struct {
         }
 
         // Pruning
-        if (!inCheck and
+        if (!in_check and
             !root and
             !pv and
             self.excluded == null and
@@ -419,7 +427,7 @@ pub const Searcher = struct {
                 (@intFromBool(!improving) + @divFloor(depth, 2));
             const probcut_beta = beta + probcut_add;
             if (depth >= 4 and eval >= probcut_beta) {
-                var pick = pi.Picker.init(.QuietTT, self, &gen, tte);
+                var pick = pi.Picker.init(.QuietTT, self, &gen, hash_move);
                 defer pick.deinit();
 
                 var stage = pick.stage;
@@ -454,7 +462,7 @@ pub const Searcher = struct {
             }
         }
 
-        var pick = pi.Picker.init(.TT, self, &gen, tte);
+        var pick = pi.Picker.init(.TT, self, &gen, hash_move);
         defer pick.deinit();
 
         const depth_sq = @as(i32, @intCast(depth)) * @as(i32, @intCast(depth));
@@ -462,8 +470,8 @@ pub const Searcher = struct {
             2 + depth_sq
         else
             @divFloor(depth_sq, 2);
-        const tt_capture = tte_move and (!self.b.isQuiet(tte.reader.?.val.move) or
-            tte.reader.?.val.move.typ.promotion());
+        const tt_capture = tte_move and (!self.b.isQuiet(hash_move.?) or
+            hash_move.?.typ.promotion());
 
         var best_move: ?tp.Move = null;
         var best_score: i32 = -MateVal;
@@ -481,6 +489,8 @@ pub const Searcher = struct {
 
         var stage = pick.stage;
         while (try pick.nextMove()) |move| {
+            const start_nodes = self.thread.nodes;
+
             self.stack[ply].stage = stage;
             self.stack[ply].hist_score = pick.current_hist;
             self.stack[ply].move = move;
@@ -503,15 +513,14 @@ pub const Searcher = struct {
                 if (cutnode) R += 2;
                 if (quiet and move_counter > quiet_count) R += 2;
                 if (tt_capture) R += 1;
-                if (!pv) R += 1;
+                if (!pv or (tte_fine and tte.reader.?.val.typ == .Exact)) R += 2;
                 if (!improving) R += 1;
 
                 // Reduce less
-                if (inCheck) R -= 1;
+                if (in_check) R -= 1;
                 if (self.stack[ply].stage == .Killer) R -= 1;
-                if (R < 0) R = 0;
-
-                r_depth = if (R >= next_depth) 1 else next_depth - R;
+                R = @min(@max(next_depth - 1, 0), @max(R, 1));
+                r_depth = next_depth - R;
             }
 
             // Skips
@@ -530,7 +539,7 @@ pub const Searcher = struct {
             // Extensions
             var E: i12 = 0;
             if (!root and self.excluded == null) {
-                // Singular extension
+                // Singular extension and multi cut
                 if (depth >= 6 + @as(i12, @intCast(@intFromBool(pv))) and
                     self.stack[ply].stage == .TT and
                     tte.reader.?.val.depth + 3 >= depth and
@@ -542,7 +551,12 @@ pub const Searcher = struct {
                     const sing = tte_score - depth_int;
 
                     self.excluded = move;
-                    score = try self.search(sing - 1, sing, @divFloor(next_depth, 2), cutnode);
+                    score = try self.search(
+                        sing - 1,
+                        sing,
+                        @divFloor(next_depth, 2),
+                        !cutnode,
+                    );
                     self.excluded = null;
 
                     if (score < sing)
@@ -582,6 +596,33 @@ pub const Searcher = struct {
             self.nnw.remove(self.b, move, undo);
             self.b.remove(move, undo);
 
+            if (root) {
+                var rm: *po.RootMove = &self.thread.root_moves.items[0];
+                var index: usize = 0;
+                for (0..self.thread.root_moves.items.len) |i| {
+                    if (self.thread.root_moves.items[i].move.equals(move)) {
+                        rm = &self.thread.root_moves.items[i];
+                        index = i;
+                        break;
+                    }
+                }
+
+                rm.nodes += self.thread.nodes - start_nodes;
+                if (!isMate(rm.avg_score)) rm.avg_score = @divFloor(rm.avg_score + score, 2);
+                const abs_score: i32 = @intCast(@abs(score));
+                if (!isMate(rm.avg_score_sq))
+                    rm.avg_score_sq = @divFloor(rm.avg_score_sq + score * abs_score, 2);
+
+                if (move_counter == 0 or score > alpha) {
+                    rm.score = score;
+                    rm.depth = depth;
+                    rm.pv_size = self.stack[1].pv_size;
+
+                    const from = @min(MaxDepth - 1, self.stack[ply + 1].pv_size);
+                    for (0..from) |i| rm.pv[i] = self.stack[ply + 1].pv[i];
+                } else rm.score = -MateVal;
+            }
+
             try histories.append(move);
             move_counter += 1;
             if (score > best_score) {
@@ -613,7 +654,7 @@ pub const Searcher = struct {
         }
 
         // Check and stalemate
-        if (move_counter == 0) return if (inCheck) mateVal(ply) else drawVal();
+        if (move_counter == 0) return if (in_check) mateVal(ply) else drawVal();
 
         // TT insert
         var store_score = best_score;
@@ -641,9 +682,9 @@ pub const Searcher = struct {
         return best_score;
     }
 
-    pub fn aspiration(self: *Searcher, prev: i32, depth: i12) !i32 {
-        var delta = @divFloor(ev.CentiPawn * 2, depth) +
-            @as(i32, @intCast(@divTrunc(@abs(prev), @as(u32, ev.PawnBase))));
+    pub fn aspiration(self: *Searcher, prev: i32, depth: i12, prev_depth: i12) !i32 {
+        var delta = @divFloor(ev.CentiPawn, 8) * (depth - prev_depth) +
+            @divFloor(self.thread.best_root.avg_score_sq, ev.CentiPawn * 16);
         var alpha = prev - delta;
         var beta = prev + delta;
 
@@ -667,11 +708,12 @@ pub const Searcher = struct {
     pub fn iterDeepening(self: *Searcher) !void {
         var depth: f32 = self.thread.iter;
         var score: i32 = 0;
+        var aspire = false;
         while (true) {
             const se_depth: i12 = @intFromFloat(depth + 0.5);
 
             // If we don't have a PV, we just do a standard search
-            if (!self.pv_exists) {
+            if (!aspire) {
                 score = self.search(-MateVal, MateVal, se_depth, false) catch |err| {
                     switch (err) {
                         error.NoTime => break,
@@ -679,28 +721,23 @@ pub const Searcher = struct {
                     }
                 };
 
-                self.pv_exists = self.stack[0].pv_size != 0;
-            }
+                aspire = true;
+            } else {
+                const prev_depth: i12 = @intFromFloat(depth - self.thread.iter + 0.5);
 
-            if (self.pv_exists) {
-                score = self.aspiration(score, se_depth) catch |err| {
+                score = self.aspiration(
+                    self.thread.best_root.avg_score,
+                    se_depth,
+                    prev_depth,
+                ) catch |err| {
                     switch (err) {
                         error.NoTime => break,
                         else => return err,
                     }
                 };
             }
-
-            // Update the threads result
-            if (self.pv_exists) {
-                self.thread.res = po.Result{
-                    .pv = self.stack[0].pv,
-                    .pv_size = self.stack[0].pv_size,
-                    .score = score,
-                    .depth = se_depth,
-                };
-                depth += self.thread.iter;
-            }
+            self.thread.sortRootMoves();
+            depth += self.thread.iter;
 
             self.clearStack();
             if (isMate(score)) break;

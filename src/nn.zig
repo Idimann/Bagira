@@ -10,7 +10,7 @@ const InputSize = 768;
 const AccumSize = 512;
 
 const Buckets = 8;
-const BucketDivisor = @divFloor((32 + Buckets - 1), Buckets);
+const BucketDivisor = std.math.divCeil(comptime_int, 32, Buckets) catch unreachable;
 
 const Net = extern struct {
     acc_weights: [InputSize][AccumSize]i16,
@@ -255,9 +255,9 @@ pub const NN = struct {
     }
 
     inline fn chooseBucket(b: *const bo.Board) usize {
-        const pieces = b.w_pieces.op_or(b.b_pieces);
+        const piece_count = b.w_pieces.op_or(b.b_pieces).popcount() - 2;
 
-        return @divFloor(pieces.popcount() - 2, BucketDivisor);
+        return std.math.clamp(@divFloor(piece_count, BucketDivisor), 0, Buckets - 1);
     }
 
     pub inline fn output(self: *NN, b: *const bo.Board) i32 {

@@ -33,7 +33,6 @@ pub const Picker = struct {
     gen: *const mv.Maker,
     list: std.ArrayList(tp.Move),
     score_list: std.ArrayList(i32),
-    tte: tt.TT_Result,
 
     stage: Stage,
     tt: ?tp.Move,
@@ -44,16 +43,15 @@ pub const Picker = struct {
         stage: Stage,
         search: *const se.Searcher,
         gen: *const mv.Maker,
-        tte: tt.TT_Result,
+        hash_move: ?tp.Move,
     ) Picker {
         return .{
             .search = search,
             .gen = gen,
             .list = std.ArrayList(tp.Move).init(search.alloc),
             .score_list = std.ArrayList(i32).init(search.alloc),
-            .tte = tte,
             .stage = stage,
-            .tt = null,
+            .tt = hash_move,
             .killer = null,
             .current_hist = null,
         };
@@ -87,16 +85,11 @@ pub const Picker = struct {
         switch (self.stage) {
             .TT => {
                 self.stage = .GenCaptures;
-                if (self.tte.reader != null and
-                    self.tte.usable and
-                    self.tte.reader.?.val.typ != .Upper and
-                    self.gen.isLegal(self.tte.reader.?.val.move))
-                {
+                if (self.tt != null and self.gen.isLegal(self.tt.?)) {
                     self.current_hist = null;
-                    self.tt = self.tte.reader.?.val.move;
                     if (self.killer == null or
-                        !self.killer.?.equals(self.tte.reader.?.val.move))
-                        return self.tte.reader.?.val.move;
+                        !self.killer.?.equals(self.tt.?))
+                        return self.tt;
                 }
             },
             .GenCaptures => {
@@ -184,16 +177,11 @@ pub const Picker = struct {
             },
             .QuietTT => {
                 self.stage = .GenQuiet;
-                if (self.tte.reader != null and
-                    self.tte.usable and
-                    self.tte.reader.?.val.typ != .Upper and
-                    self.gen.isLegal(self.tte.reader.?.val.move))
-                {
+                if (self.tt != null and self.gen.isLegal(self.tt.?)) {
                     self.current_hist = null;
-                    self.tt = self.tte.reader.?.val.move;
                     if (self.killer == null or
-                        !self.killer.?.equals(self.tte.reader.?.val.move))
-                        return self.tte.reader.?.val.move;
+                        !self.killer.?.equals(self.tt.?))
+                        return self.tt;
                 }
             },
             .GenQuiet => {

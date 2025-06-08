@@ -155,18 +155,18 @@ pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool
             break;
         }
     } else {
-        const best = try po.bestMove(b, nnw, time);
-        if (best.depth != 0) {
-            _ = b.apply(best.pv[0]);
+        if (try po.bestMove(b, nnw, time)) |best| {
+            _ = b.apply(best.move);
             if (!minimal) {
                 b.print();
+                std.debug.print("Nodes: {}\n", .{best.nodes});
                 for (0..@intCast(best.pv_size)) |i| {
                     std.debug.print("\t=> ", .{});
                     best.pv[i].print();
                     std.debug.print("\n", .{});
                 }
             }
-            best.pv[0].print();
+            best.move.print();
             std.debug.print("\n", .{});
             if (se.Searcher.isMate(best.score)) {
                 const len = @divFloor(best.depth + 1, 2);
@@ -190,18 +190,18 @@ pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool
 }
 
 pub fn selfPlay(b: *bo.Board, nnw: *nn.NN, time: i64, minimal: bool) !void {
-    const best = try po.bestMove(b, nnw, time);
-    if (best.depth != 0) {
-        _ = b.apply(best.pv[0]);
+    if (try po.bestMove(b, nnw, time)) |best| {
+        _ = b.apply(best.move);
         if (!minimal) {
             b.print();
+            std.debug.print("Nodes: {}\n", .{best.nodes});
             for (0..@intCast(best.pv_size)) |i| {
                 std.debug.print("\t=> ", .{});
                 best.pv[i].print();
                 std.debug.print("\n", .{});
             }
         }
-        best.pv[0].print();
+        best.move.print();
         std.debug.print("\n", .{});
         if (se.Searcher.isMate(best.score)) {
             const len = @divFloor(best.depth + 1, 2);
