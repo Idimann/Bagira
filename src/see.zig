@@ -23,12 +23,12 @@ pub fn see(
     var val = SeeValue[@intFromEnum(b.pieceType(move.to))] - threshold;
     if (val < 0) return false;
 
-    val -= SeeValue[@intFromEnum(b.pieceType(move.from))];
-    if (val >= 0) return true;
+    val = SeeValue[@intFromEnum(b.pieceType(move.from))] - val;
+    if (val <= 0) return true;
 
     var attacks = gen.attackers(move.to);
     var all = b.w_pieces.op_or(b.b_pieces);
-    var side = b.side.getOther();
+    var side = b.side;
 
     while (true) {
         attacks = attacks.op_and(all);

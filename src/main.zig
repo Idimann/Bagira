@@ -20,6 +20,6 @@ pub fn main() !void {
 
     // nnw.inputAccum(&b);
     // std.debug.print("{}\n", .{nnw.output(&b)});
-    try pl.play(&b, &nnw, .Black, 1000, false);
+    try pl.play(&b, &nnw, .Black, 5000, false);
     // try pl.perft_print(&b, 6, std.heap.c_allocator);
 }

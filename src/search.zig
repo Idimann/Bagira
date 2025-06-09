@@ -8,7 +8,7 @@ const tt = @import("tt.zig");
 const po = @import("pool.zig");
 const pi = @import("movepick.zig");
 const hi = @import("history.zig");
-const se = @import("see.zig");
+const see = @import("see.zig");
 
 fn initReductions() [2][32][32]i12 {
     var ret = std.mem.zeroes([2][32][32]i12);
@@ -252,7 +252,7 @@ pub const Searcher = struct {
                 }
 
                 // SEE Pruning
-                if (!se.see(self.b, move, &gen, 0)) continue;
+                if (!see.see(self.b, move, &gen, 0)) continue;
             }
 
             const undo = self.b.apply(move);
@@ -539,7 +539,7 @@ pub const Searcher = struct {
             // Skips
             if (self.excluded != null and move.equals(self.excluded.?)) continue;
             if (!isLoss(best_score)) {
-                if (!se.see(
+                if (!see.see(
                     self.b,
                     move,
                     &gen,
@@ -620,9 +620,8 @@ pub const Searcher = struct {
 
                 rm.nodes += self.thread.nodes - start_nodes;
                 if (!isMate(rm.avg_score)) rm.avg_score = @divFloor(rm.avg_score + score, 2);
-                const abs_score: i32 = @intCast(@abs(score));
                 if (!isMate(rm.avg_score_sq))
-                    rm.avg_score_sq = @divFloor(rm.avg_score_sq + score * abs_score, 2);
+                    rm.avg_score_sq = @divFloor(rm.avg_score_sq + score * score, 2);
 
                 if (move_counter == 0 or score > alpha) {
                     rm.score = score;
@@ -693,8 +692,8 @@ pub const Searcher = struct {
         return best_score;
     }
 
-    pub fn aspiration(self: *Searcher, prev: i32, depth: i12, prev_depth: i12) !i32 {
-        var delta = @divFloor(ev.CentiPawn, 8) * (depth - prev_depth) +
+    pub fn aspiration(self: *Searcher, prev: i32, depth: i12) !i32 {
+        var delta = @divFloor(ev.CentiPawn, 8) +
             @divFloor(self.thread.best_root.avg_score_sq, ev.CentiPawn * 16);
         var alpha = prev - delta;
         var beta = prev + delta;
@@ -718,28 +717,21 @@ pub const Searcher = struct {
 
     pub fn iterDeepening(self: *Searcher) !void {
         var depth: f32 = self.thread.iter;
-        var score: i32 = 0;
-        var aspire = false;
+        var score: i32 = -MateVal;
         while (true) {
             const se_depth: i12 = @intFromFloat(depth + 0.5);
-
             // If we don't have a PV, we just do a standard search
-            if (!aspire) {
+            if (score == -MateVal) {
                 score = self.search(-MateVal, MateVal, se_depth, false) catch |err| {
                     switch (err) {
                         error.NoTime => break,
                         else => return err,
                     }
                 };
-
-                aspire = true;
             } else {
-                const prev_depth: i12 = @intFromFloat(depth - self.thread.iter + 0.5);
-
                 score = self.aspiration(
                     self.thread.best_root.avg_score,
                     se_depth,
-                    prev_depth,
                 ) catch |err| {
                     switch (err) {
                         error.NoTime => break,

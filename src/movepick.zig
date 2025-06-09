@@ -3,6 +3,7 @@ const tp = @import("types.zig");
 const mv = @import("movegen.zig");
 const se = @import("search.zig");
 const tt = @import("tt.zig");
+const see = @import("see.zig");
 
 pub const Stage = enum {
     // Hash move
