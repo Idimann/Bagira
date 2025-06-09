@@ -17,8 +17,10 @@ pub fn main() !void {
 
     var nnw = try nn.NN.init("networks/", "v2_1.bin");
     var b = try bo.Board.fromFen(pos.start);
+    std.debug.print("{any}\n", .{nnw.network.out_weights});
 
-    // std.debug.print("{}\n", .{try pl.legals(&b, 1, std.heap.c_allocator)});
-    // try pl.legals_print(&b, 4, std.heap.c_allocator);
-    try pl.play(&b, &nnw, .Black, 1000, false);
+    // nnw.inputAccum(&b);
+    // std.debug.print("{}\n", .{nnw.output(&b)});
+    try pl.play(&b, &nnw, .White, 1000, false);
+    // try pl.perft_print(&b, 6, std.heap.c_allocator);
 }

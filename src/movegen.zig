@@ -56,10 +56,7 @@ pub const Maker = struct {
                     sq.getApplySafe(.NorthNorth)
                 else
                     sq.getApplySafe(.SouthSouth);
-                if (sq.rank() == double_rank and
-                    next2 != null and
-                    !self.dat.combi.check(next2.?))
-                {
+                if (sq.rank() == double_rank and !self.dat.combi.check(next2.?)) {
                     const move2 = tp.Move{ .from = sq, .to = next2.?, .typ = .Normal };
 
                     if (self.al.check(next) and self.al.check(next2.?))
@@ -82,38 +79,44 @@ pub const Maker = struct {
         }
 
         if (cap != .Quiet and p != .Line) {
-            const diag_pin = if (sq.diagonal() == self.dat.our_king.diagonal())
-                true
-            else
-                false;
             var hit = (if (self.b.side == .White)
                 ta.PawnAttacksWhite[@intFromEnum(sq)].op_and(self.dat.their)
             else
                 ta.PawnAttacksBlack[@intFromEnum(sq)].op_and(self.dat.their))
                 .op_and(self.al);
+            if (p == .Diag) {
+                if (sq.diagonal() == self.dat.our_king.diagonal())
+                    hit.v &= tp.DiagonalMask[sq.diagonal()].v
+                else
+                    hit.v &= tp.AntiDiagonalMask[sq.antiDiagonal()].v;
+            }
+            const num = if (next.rank() == prom_rank) hit.popcount() else hit.popcount() * 4;
+            try list.ensureUnusedCapacity(num);
             while (hit.popLsb()) |to| {
-                if (p == .Diag and diag_pin != (to.diagonal() == sq.diagonal())) continue;
-
                 if (to.rank() == prom_rank) {
-                    try list.appendSlice(&[_]tp.Move{
+                    list.appendSliceAssumeCapacity(&[_]tp.Move{
                         .{ .from = sq, .to = to, .typ = .PromKnight },
                         .{ .from = sq, .to = to, .typ = .PromBishop },
                         .{ .from = sq, .to = to, .typ = .PromRook },
                         .{ .from = sq, .to = to, .typ = .PromQueen },
                     });
-                } else try list.append(.{ .from = sq, .to = to, .typ = .Normal });
+                } else list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
             }
 
-            const en_passant = (if (self.b.side == .White)
+            var en_passant = (if (self.b.side == .White)
                 ta.PawnAttacksWhite[@intFromEnum(sq)]
             else
                 ta.PawnAttacksBlack[@intFromEnum(sq)])
                 .op_and(self.b.enPassant())
                 .op_and(self.al);
-            if (en_passant.lsb()) |to| {
-                if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal()))
-                    try list.append(.{ .from = sq, .to = to, .typ = .EnPassant });
+            if (p == .Diag) {
+                if (sq.diagonal() == self.dat.our_king.diagonal())
+                    en_passant.v &= tp.DiagonalMask[sq.diagonal()].v
+                else
+                    en_passant.v &= tp.AntiDiagonalMask[sq.antiDiagonal()].v;
             }
+            if (en_passant.lsb()) |to|
+                try list.append(.{ .from = sq, .to = to, .typ = .EnPassant });
         }
     }
 
@@ -250,9 +253,8 @@ pub const Maker = struct {
             else if (cap == .Quiet)
                 iter = iter.without(self.dat.their);
             try list.ensureUnusedCapacity(iter.popcount());
-            while (iter.popLsb()) |to| {
+            while (iter.popLsb()) |to|
                 list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
-            }
         }
     }
 
@@ -286,17 +288,14 @@ pub const Maker = struct {
             else if (cap == .Quiet)
                 iter = iter.without(self.dat.their);
             if (p == .Line) {
-                const rank_pin = if (sq.rank() == self.dat.our_king.rank()) true else false;
-                while (iter.popLsb()) |to| {
-                    if (rank_pin != (to.rank() == sq.rank())) continue;
-
-                    try list.append(.{ .from = sq, .to = to, .typ = .Normal });
-                }
-            } else {
-                while (iter.popLsb()) |to| {
-                    try list.append(.{ .from = sq, .to = to, .typ = .Normal });
-                }
+                if (sq.rank() == self.dat.our_king.rank())
+                    iter.v &= tp.RankMask[@intFromEnum(sq.rank())].v
+                else
+                    iter.v &= tp.FileMask[@intFromEnum(sq.file())].v;
             }
+            try list.ensureUnusedCapacity(iter.popcount());
+            while (iter.popLsb()) |to|
+                list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
         }
     }
 
@@ -307,16 +306,17 @@ pub const Maker = struct {
         mv: tp.Move,
     ) bool {
         if (p != .Diag) {
-            const iter = ta.getLine(sq, self.dat.combi)
+            var iter = ta.getLine(sq, self.dat.combi)
                 .without(self.dat.our)
                 .op_and(mv.to.toBoard())
                 .op_and(self.al);
             if (p == .Line) {
-                const rank_pin = if (sq.rank() == self.dat.our_king.rank()) true else false;
-                if (iter.lsb()) |to| {
-                    if (rank_pin == (to.rank() == sq.rank())) return true;
-                }
-            } else return iter.lsb() != null;
+                if (sq.rank() == self.dat.our_king.rank())
+                    iter.v &= tp.RankMask[@intFromEnum(sq.rank())].v
+                else
+                    iter.v &= tp.FileMask[@intFromEnum(sq.file())].v;
+            }
+            return iter.lsb() != null;
         }
 
         return false;
@@ -338,20 +338,14 @@ pub const Maker = struct {
             else if (cap == .Quiet)
                 iter = iter.without(self.dat.their);
             if (p == .Diag) {
-                const diag_pin = if (sq.diagonal() == self.dat.our_king.diagonal())
-                    true
+                if (sq.diagonal() == self.dat.our_king.diagonal())
+                    iter.v &= tp.DiagonalMask[sq.diagonal()].v
                 else
-                    false;
-                while (iter.popLsb()) |to| {
-                    if (diag_pin != (to.diagonal() == sq.diagonal())) continue;
-
-                    try list.append(.{ .from = sq, .to = to, .typ = .Normal });
-                }
-            } else {
-                while (iter.popLsb()) |to| {
-                    try list.append(.{ .from = sq, .to = to, .typ = .Normal });
-                }
+                    iter.v &= tp.AntiDiagonalMask[sq.antiDiagonal()].v;
             }
+            try list.ensureUnusedCapacity(iter.popcount());
+            while (iter.popLsb()) |to|
+                list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
         }
     }
 
@@ -362,16 +356,17 @@ pub const Maker = struct {
         mv: tp.Move,
     ) bool {
         if (p != .Line) {
-            const iter = ta.getDiag(sq, self.dat.combi)
+            var iter = ta.getDiag(sq, self.dat.combi)
                 .without(self.dat.our)
                 .op_and(mv.to.toBoard())
                 .op_and(self.al);
             if (p == .Diag) {
-                const diag_pin = sq.diagonal() == self.dat.our_king.diagonal();
-                if (iter.lsb()) |to| {
-                    if (diag_pin == (to.diagonal() == sq.diagonal())) return true;
-                }
-            } else return iter.lsb() != null;
+                if (sq.diagonal() == self.dat.our_king.diagonal())
+                    iter.v &= tp.DiagonalMask[sq.diagonal()].v
+                else
+                    iter.v &= tp.AntiDiagonalMask[sq.antiDiagonal()].v;
+            }
+            return iter.lsb() != null;
         }
 
         return false;

@@ -58,7 +58,7 @@ pub const Thread = struct {
     }
 };
 
-const PoolSize = 8;
+const PoolSize = 1;
 var Pool: [PoolSize]Thread = undefined;
 fn initPool(b: *const bo.Board, nnw: *nn.NN) !bool {
     const float_size: f32 = @floatFromInt(PoolSize);
@@ -170,6 +170,8 @@ pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !?RootMove {
         // Update the best thread
         if (new_val > best_val or (new_val == best_val and better)) best = &Pool[i];
     }
+
+    std.debug.print("Total nodes: {}\n", .{best.nodes});
 
     const ret = best.best_root;
     deinitPool();

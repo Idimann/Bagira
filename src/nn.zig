@@ -105,6 +105,27 @@ pub const NN = struct {
         }
     }
 
+    inline fn accumAddSubProm(
+        self: *NN,
+        from: tp.Square,
+        to: tp.Square,
+        from_typ: tp.PieceType,
+        to_typ: tp.PieceType,
+        side: bo.Side,
+    ) void {
+        const index_wf = calcIndex(.White, from, from_typ, side);
+        const index_bf = calcIndex(.Black, from, from_typ, side);
+        const index_wt = calcIndex(.White, to, to_typ, side);
+        const index_bt = calcIndex(.Black, to, to_typ, side);
+
+        for (0..AccumSize) |i| {
+            self.accum_w[i] -= self.network.acc_weights[index_wf][i];
+            self.accum_b[i] -= self.network.acc_weights[index_bf][i];
+            self.accum_w[i] += self.network.acc_weights[index_wt][i];
+            self.accum_b[i] += self.network.acc_weights[index_bt][i];
+        }
+    }
+
     pub inline fn inputAccum(self: *NN, b: *const bo.Board) void {
         self.accum_w = std.mem.zeroes([AccumSize]i16);
         self.accum_b = std.mem.zeroes([AccumSize]i16);
@@ -139,47 +160,37 @@ pub const NN = struct {
             .CastleKingside => {
                 const typ = b.pieceType(m.to);
                 self.accumAddSub(m.from, m.to, typ, b.side.getOther());
-                if (b.side == .White) {
-                    self.accumSub(.h8, .Rook, .Black);
-                    self.accumAdd(.f8, .Rook, .Black);
-                } else {
-                    self.accumSub(.h1, .Rook, .White);
-                    self.accumAdd(.f1, .Rook, .White);
-                }
+                if (b.side == .White)
+                    self.accumAddSub(.h8, .f8, .Rook, .Black)
+                 else
+                    self.accumAddSub(.h1, .f1, .Rook, .White);
             },
             .CastleQueenside => {
                 const typ = b.pieceType(m.to);
                 self.accumAddSub(m.from, m.to, typ, b.side.getOther());
-                if (b.side == .White) {
-                    self.accumSub(.a8, .Rook, .Black);
-                    self.accumAdd(.d8, .Rook, .Black);
-                } else {
-                    self.accumSub(.a1, .Rook, .White);
-                    self.accumAdd(.d1, .Rook, .White);
-                }
+                if (b.side == .White)
+                    self.accumAddSub(.a8, .d8, .Rook, .Black)
+                 else
+                    self.accumAddSub(.a1, .d1, .Rook, .White);
             },
             .PromKnight => {
                 const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, .Knight, b.side.getOther());
+                self.accumAddSubProm(m.from, m.to, typ, .Knight, b.side.getOther());
                 if (undo.typ) |t| self.accumSub(m.to, t, b.side);
             },
             .PromBishop => {
                 const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, .Bishop, b.side.getOther());
+                self.accumAddSubProm(m.from, m.to, typ, .Bishop, b.side.getOther());
                 if (undo.typ) |t| self.accumSub(m.to, t, b.side);
             },
             .PromRook => {
                 const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, .Rook, b.side.getOther());
+                self.accumAddSubProm(m.from, m.to, typ, .Rook, b.side.getOther());
                 if (undo.typ) |t| self.accumSub(m.to, t, b.side);
             },
             .PromQueen => {
                 const typ = b.pieceType(m.to);
-                self.accumSub(m.from, typ, b.side.getOther());
-                self.accumAdd(m.to, .Queen, b.side.getOther());
+                self.accumAddSubProm(m.from, m.to, typ, .Queen, b.side.getOther());
                 if (undo.typ) |t| self.accumSub(m.to, t, b.side);
             },
         }
@@ -190,14 +201,12 @@ pub const NN = struct {
         switch (m.typ) {
             .Normal => {
                 const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, typ, b.side.getOther());
+                self.accumAddSub(m.to, m.from, typ, b.side.getOther());
                 if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
             },
             .EnPassant => {
                 const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, typ, b.side.getOther());
+                self.accumAddSub(m.to, m.from, typ, b.side.getOther());
                 if (b.side == .White)
                     self.accumAdd(m.to.getApply(.North), .Pawn, b.side)
                 else
@@ -205,50 +214,38 @@ pub const NN = struct {
             },
             .CastleKingside => {
                 const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, typ, b.side.getOther());
-                if (b.side == .White) {
-                    self.accumAdd(.h8, .Rook, .Black);
-                    self.accumSub(.f8, .Rook, .Black);
-                } else {
-                    self.accumAdd(.h1, .Rook, .White);
-                    self.accumSub(.f1, .Rook, .White);
-                }
+                self.accumAddSub(m.to, m.from, typ, b.side.getOther());
+                if (b.side == .White)
+                    self.accumAddSub(.f8, .h8, .Rook, .Black)
+                 else
+                    self.accumAddSub(.f1, .h1, .Rook, .White);
             },
             .CastleQueenside => {
                 const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, typ, b.side.getOther());
-                if (b.side == .White) {
-                    self.accumAdd(.a8, .Rook, .Black);
-                    self.accumSub(.d8, .Rook, .Black);
-                } else {
-                    self.accumAdd(.a1, .Rook, .White);
-                    self.accumSub(.d1, .Rook, .White);
-                }
+                self.accumAddSub(m.to, m.from, typ, b.side.getOther());
+                if (b.side == .White)
+                    self.accumAddSub(.d8, .a8, .Rook, .Black)
+                 else
+                    self.accumAddSub(.d1, .a1, .Rook, .White);
             },
             .PromKnight => {
                 const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, .Knight, b.side.getOther());
+                self.accumAddSubProm(m.to, m.from, .Knight, typ, b.side.getOther());
                 if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
             },
             .PromBishop => {
                 const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, .Bishop, b.side.getOther());
+                self.accumAddSubProm(m.to, m.from, .Bishop, typ, b.side.getOther());
                 if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
             },
             .PromRook => {
                 const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, .Rook, b.side.getOther());
+                self.accumAddSubProm(m.to, m.from, .Rook, typ, b.side.getOther());
                 if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
             },
             .PromQueen => {
                 const typ = b.pieceType(m.to);
-                self.accumAdd(m.from, typ, b.side.getOther());
-                self.accumSub(m.to, .Queen, b.side.getOther());
+                self.accumAddSubProm(m.to, m.from, .Queen, typ, b.side.getOther());
                 if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
             },
         }
@@ -264,17 +261,19 @@ pub const NN = struct {
         var ret: i32 = 0;
         const bucket = chooseBucket(b);
 
-        for (0..AccumSize) |i| {
-            if (b.side == .White) {
+        if (b.side == .White) {
+            for (0..AccumSize) |i| {
                 ret += activation(self.accum_w[i]) *
-                    @as(i32, @intCast(self.network.out_weights[bucket][i]));
+                @as(i32, @intCast(self.network.out_weights[bucket][i]));
                 ret += activation(self.accum_b[i]) *
-                    @as(i32, @intCast(self.network.out_weights[bucket][i + AccumSize]));
-            } else {
+                @as(i32, @intCast(self.network.out_weights[bucket][i + AccumSize]));
+            }
+        } else {
+            for (0..AccumSize) |i| {
                 ret += activation(self.accum_w[i]) *
-                    @as(i32, @intCast(self.network.out_weights[bucket][i + AccumSize]));
+                @as(i32, @intCast(self.network.out_weights[bucket][i + AccumSize]));
                 ret += activation(self.accum_b[i]) *
-                    @as(i32, @intCast(self.network.out_weights[bucket][i]));
+                @as(i32, @intCast(self.network.out_weights[bucket][i]));
             }
         }
         ret = @divTrunc(ret, QA);

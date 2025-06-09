@@ -256,8 +256,8 @@ pub const Searcher = struct {
             }
 
             const undo = self.b.apply(move);
-            self.nnw.move(self.b, move, undo);
             tt.prefetch(self.b, false);
+            self.nnw.move(self.b, move, undo);
 
             const score = -try self.quietSearch(-beta, -alpha);
 
@@ -393,14 +393,14 @@ pub const Searcher = struct {
                 const razor = if (isLoss(alpha))
                     alpha
                 else
-                    alpha - ev.CentiPawn * 11 * depth * depth;
+                    alpha - ev.CentiPawn * 14 * depth * depth;
 
-                // Reverse futility pruning
-                if (eval >= futility) return eval;
+                // Reverse futility pruning (Depth for mate finding)
+                if (depth < 15 and eval >= futility) return eval;
 
                 // Razoring
                 if (!improving and eval < razor) {
-                    const score = try self.quietSearch(-alpha - 1, -alpha);
+                    const score = try self.quietSearch(alpha - 1, alpha);
                     if (score < alpha) return if (isMate(score)) alpha else score;
                 }
             }
@@ -423,10 +423,10 @@ pub const Searcher = struct {
             }
 
             // Prob cut
-            const probcut_add = ev.CentiPawn * 12 *
-                (@intFromBool(!improving) + @divFloor(depth, 2));
+            const improve_int: i32 = @intCast(@intFromBool(improving));
+            const probcut_add = ev.CentiPawn * (8 - 2 * improve_int);
             const probcut_beta = beta + probcut_add;
-            if (depth >= 4 and eval >= probcut_beta) {
+            if (depth >= 3 and eval >= probcut_beta) {
                 var pick = pi.Picker.init(.QuietTT, self, &gen, hash_move);
                 defer pick.deinit();
 
@@ -438,13 +438,10 @@ pub const Searcher = struct {
                     stage = pick.stage;
 
                     const undo = self.b.apply(move);
-                    self.nnw.move(self.b, move, undo);
                     tt.prefetch(self.b, false);
+                    self.nnw.move(self.b, move, undo);
 
                     var score = -try self.quietSearch(-probcut_beta, -probcut_beta + 1);
-
-                    self.nnw.remove(self.b, move, undo);
-                    self.b.remove(move, undo);
 
                     if (score >= probcut_beta)
                         score = -try self.search(
@@ -454,10 +451,26 @@ pub const Searcher = struct {
                             !cutnode,
                         );
 
-                    if (score >= probcut_beta) return if (isLoss(score))
-                        score
-                    else
-                        score - probcut_add;
+                    self.nnw.remove(self.b, move, undo);
+                    self.b.remove(move, undo);
+
+                    if (score >= probcut_beta) {
+                        if (isLoss(score)) return score;
+
+                        // Store ProbCut data
+                        tt.store(
+                            self.b,
+                            score - probcut_add,
+                            static,
+                            depth,
+                            probcut_beta - 1,
+                            probcut_beta,
+                            move,
+                            self.start_ply,
+                            tte,
+                        );
+                        return score - probcut_add;
+                    }
                 }
             }
         }
@@ -531,9 +544,7 @@ pub const Searcher = struct {
                     move,
                     &gen,
                     Prunes[@intFromBool(quiet)][@intCast(r_depth)],
-                )) {
-                    continue;
-                }
+                )) continue;
             }
 
             // Extensions
@@ -574,8 +585,8 @@ pub const Searcher = struct {
             next_depth += @max(E, -@divFloor(next_depth, 3));
 
             const undo = self.b.apply(move);
+            tt.prefetch(self.b, false);
             self.nnw.move(self.b, move, undo);
-            tt.prefetch(self.b, true);
 
             // LMR
             if (next_depth > 1 and
