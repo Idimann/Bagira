@@ -43,7 +43,7 @@ pub const NN = struct {
     }
 
     // Squared Clipped ReLU (SCReLU)
-    inline fn activation(i: i16) i32 {
+    inline fn activate(i: i16) i32 {
         const clamp: i32 = @intCast(std.math.clamp(i, 0, QA));
         return clamp * clamp;
     }
@@ -162,7 +162,7 @@ pub const NN = struct {
                 self.accumAddSub(m.from, m.to, typ, b.side.getOther());
                 if (b.side == .White)
                     self.accumAddSub(.h8, .f8, .Rook, .Black)
-                 else
+                else
                     self.accumAddSub(.h1, .f1, .Rook, .White);
             },
             .CastleQueenside => {
@@ -170,7 +170,7 @@ pub const NN = struct {
                 self.accumAddSub(m.from, m.to, typ, b.side.getOther());
                 if (b.side == .White)
                     self.accumAddSub(.a8, .d8, .Rook, .Black)
-                 else
+                else
                     self.accumAddSub(.a1, .d1, .Rook, .White);
             },
             .PromKnight => {
@@ -217,7 +217,7 @@ pub const NN = struct {
                 self.accumAddSub(m.to, m.from, typ, b.side.getOther());
                 if (b.side == .White)
                     self.accumAddSub(.f8, .h8, .Rook, .Black)
-                 else
+                else
                     self.accumAddSub(.f1, .h1, .Rook, .White);
             },
             .CastleQueenside => {
@@ -225,7 +225,7 @@ pub const NN = struct {
                 self.accumAddSub(m.to, m.from, typ, b.side.getOther());
                 if (b.side == .White)
                     self.accumAddSub(.d8, .a8, .Rook, .Black)
-                 else
+                else
                     self.accumAddSub(.d1, .a1, .Rook, .White);
             },
             .PromKnight => {
@@ -261,19 +261,16 @@ pub const NN = struct {
         var ret: i32 = 0;
         const bucket = chooseBucket(b);
 
+        const weights = &self.network.out_weights[bucket];
         if (b.side == .White) {
             for (0..AccumSize) |i| {
-                ret += activation(self.accum_w[i]) *
-                @as(i32, @intCast(self.network.out_weights[bucket][i]));
-                ret += activation(self.accum_b[i]) *
-                @as(i32, @intCast(self.network.out_weights[bucket][i + AccumSize]));
+                ret += activate(self.accum_w[i]) * @as(i32, @intCast(weights[i]));
+                ret += activate(self.accum_b[i]) * @as(i32, @intCast(weights[i + AccumSize]));
             }
         } else {
             for (0..AccumSize) |i| {
-                ret += activation(self.accum_w[i]) *
-                @as(i32, @intCast(self.network.out_weights[bucket][i + AccumSize]));
-                ret += activation(self.accum_b[i]) *
-                @as(i32, @intCast(self.network.out_weights[bucket][i]));
+                ret += activate(self.accum_w[i]) * @as(i32, @intCast(weights[i + AccumSize]));
+                ret += activate(self.accum_b[i]) * @as(i32, @intCast(weights[i]));
             }
         }
         ret = @divTrunc(ret, QA);

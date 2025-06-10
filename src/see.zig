@@ -33,13 +33,13 @@ pub fn see(
     while (true) {
         attacks = attacks.op_and(all);
 
-        const my = attacks.op_and(b.side_pieces(side));
+        const my = attacks.op_and(b.sidePieces(side));
         if (my.v == 0) break;
 
         var typ: u6 = 0;
         var current = std.mem.zeroes(tp.Square);
         while (typ < 6) : (typ += 1) {
-            if (my.op_and(b.type_pieces(@enumFromInt(typ))).lsb()) |s| {
+            if (my.op_and(b.typePieces(@enumFromInt(typ))).lsb()) |s| {
                 current = s;
                 break;
             }
@@ -49,7 +49,7 @@ pub fn see(
         val = SeeValue[typ] - val;
         if (val >= 0) {
             if (typ == @intFromEnum(tp.PieceType.King) and
-                attacks.op_and(b.side_pieces(side)).v != 0) side.other();
+                attacks.op_and(b.sidePieces(side)).v != 0) side.other();
             break;
         }
 

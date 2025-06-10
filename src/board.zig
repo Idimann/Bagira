@@ -75,11 +75,11 @@ pub const Board = struct {
         return !self.w_pieces.op_or(self.b_pieces).check(m.to);
     }
 
-    pub inline fn side_pieces(self: *const Board, side: Side) tp.BitBoard {
+    pub inline fn sidePieces(self: *const Board, side: Side) tp.BitBoard {
         return if (side == .White) self.w_pieces else self.b_pieces;
     }
 
-    pub inline fn type_pieces(self: *const Board, typ: tp.PieceType) tp.BitBoard {
+    pub inline fn typePieces(self: *const Board, typ: tp.PieceType) tp.BitBoard {
         const all = self.w_pieces.op_or(self.b_pieces);
 
         return switch (typ) {
