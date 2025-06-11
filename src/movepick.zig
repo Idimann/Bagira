@@ -3,6 +3,8 @@ const tp = @import("types.zig");
 const mv = @import("movegen.zig");
 const se = @import("search.zig");
 const tt = @import("tt.zig");
+const ev = @import("eval.zig");
+const hi = @import("history.zig");
 const see = @import("see.zig");
 
 pub const Stage = enum {
@@ -34,8 +36,11 @@ pub const Picker = struct {
     gen: *const mv.Maker,
     list: std.ArrayList(tp.Move),
     score_list: std.ArrayList(i32),
+    pawn_attacked: ?tp.BitBoard,
 
     stage: Stage,
+    ret_stage: Stage,
+    skip_quiets: bool,
     tt: ?tp.Move,
     killer: ?tp.Move,
     current_hist: ?i32,
@@ -49,9 +54,12 @@ pub const Picker = struct {
         return .{
             .search = search,
             .gen = gen,
-            .list = std.ArrayList(tp.Move).init(search.alloc),
-            .score_list = std.ArrayList(i32).init(search.alloc),
+            .list = .init(search.alloc),
+            .score_list = .init(search.alloc),
+            .pawn_attacked = null,
             .stage = stage,
+            .ret_stage = stage,
+            .skip_quiets = false,
             .tt = hash_move,
             .killer = null,
             .current_hist = null,
@@ -63,7 +71,7 @@ pub const Picker = struct {
         self.score_list.deinit();
     }
 
-    inline fn sort_moves(self: *Picker) void {
+    inline fn sortMoves(self: *Picker) void {
         if (self.list.items.len < 2) return;
 
         for (0..(self.list.items.len - 1)) |i| {
@@ -80,6 +88,39 @@ pub const Picker = struct {
         }
     }
 
+    inline fn scoreMoves(self: *Picker) !void {
+        const ply = self.search.b.hash_in - self.search.start_ply;
+        if (self.pawn_attacked == null) self.pawn_attacked = self.gen.attackedPawn();
+
+        self.score_list.items.len = 0;
+        try self.score_list.ensureTotalCapacity(self.list.items.len);
+        for (0..self.list.items.len) |i| {
+            const move = self.list.items[i];
+            var score: i32 = 0;
+
+            // Penalty for moving to a square attacked by a pawn
+            if (self.pawn_attacked.?.check(move.to)) {
+                score -= ev.PieceValue[@intFromEnum(self.search.b.pieceType(move.from))];
+                score += ev.PawnBase;
+            }
+
+            // We convert the previous boni/mali to history vals
+            score *= hi.CentiHist;
+            score = @divFloor(score, ev.CentiPawn);
+
+            // History boni
+            score += self.search.stats.get(
+                self.search.b,
+                if (ply == 0) null else self.search.stack[ply - 1].move,
+                move,
+            );
+
+            self.score_list.appendAssumeCapacity(score);
+        }
+
+        self.sortMoves();
+    }
+
     pub fn nextMove(self: *Picker) !?tp.Move {
         const ply = self.search.b.hash_in - self.search.start_ply;
 
@@ -90,23 +131,16 @@ pub const Picker = struct {
                     self.current_hist = null;
                     if (self.killer == null or
                         !self.killer.?.equals(self.tt.?))
+                    {
+                        self.ret_stage = .TT;
                         return self.tt;
+                    }
                 }
             },
             .GenCaptures => {
                 try self.gen.gen(&self.list, .Capture);
-                self.score_list.items.len = 0;
-                try self.score_list.ensureTotalCapacity(self.list.items.len);
-
-                for (0..self.list.items.len) |i| {
-                    const score = self.search.stats.get(
-                        self.search.b,
-                        if (ply == 0) null else self.search.stack[ply - 1].move,
-                        self.list.items[i],
-                    );
-                    self.score_list.appendAssumeCapacity(score);
-                }
-                self.sort_moves();
+                try self.scoreMoves();
+                self.sortMoves();
 
                 self.stage = .GoodCaptures;
             },
@@ -121,7 +155,10 @@ pub const Picker = struct {
 
                     if ((self.tt == null or !self.tt.?.equals(move)) and
                         (self.killer == null or !self.killer.?.equals(move)))
+                    {
+                        self.ret_stage = .GoodCaptures;
                         return move;
+                    }
                 }
             },
             .Killer => {
@@ -131,8 +168,10 @@ pub const Picker = struct {
                         if (self.gen.isLegal(move)) {
                             self.current_hist = null;
                             self.killer = move;
-                            if (self.tt == null or !self.tt.?.equals(move))
+                            if (self.tt == null or !self.tt.?.equals(move)) {
+                                self.ret_stage = .Killer;
                                 return move;
+                            }
                         }
                     }
                 }
@@ -146,35 +185,36 @@ pub const Picker = struct {
 
                     if ((self.tt == null or !self.tt.?.equals(move)) and
                         (self.killer == null or !self.killer.?.equals(move)))
+                    {
+                        self.ret_stage = .BadCaptures;
                         return move;
+                    }
                 }
             },
             .GenQuiets => {
+                if (self.skip_quiets) return null;
+
                 try self.gen.gen(&self.list, .Quiet);
                 try self.gen.gen(&self.list, .Castle);
-                self.score_list.items.len = 0;
-                try self.score_list.ensureTotalCapacity(self.list.items.len);
 
-                for (0..self.list.items.len) |i| {
-                    const score = self.search.stats.get(
-                        self.search.b,
-                        if (ply == 0) null else self.search.stack[ply - 1].move,
-                        self.list.items[i],
-                    );
-                    self.score_list.appendAssumeCapacity(score);
-                }
-                self.sort_moves();
+                try self.scoreMoves();
+                self.sortMoves();
 
                 self.stage = .Quiets;
             },
             .Quiets => {
+                if (self.skip_quiets) return null;
+
                 const move = self.list.pop();
                 self.current_hist = self.score_list.pop();
                 if (move == null) return move;
 
                 if ((self.tt == null or !self.tt.?.equals(move.?)) and
                     (self.killer == null or !self.killer.?.equals(move.?)))
+                {
+                    self.ret_stage = .Quiets;
                     return move;
+                }
             },
             .QuietTT => {
                 self.stage = .GenQuiet;
@@ -182,37 +222,38 @@ pub const Picker = struct {
                     self.current_hist = null;
                     if (self.killer == null or
                         !self.killer.?.equals(self.tt.?))
+                    {
+                        self.ret_stage = .QuietTT;
                         return self.tt;
+                    }
                 }
             },
             .GenQuiet => {
+                if (self.skip_quiets) return null;
+
                 if (self.gen.checks > 0)
                     try self.gen.gen(&self.list, .Either)
                 else
                     try self.gen.gen(&self.list, .Capture);
-                self.score_list.items.len = 0;
-                try self.score_list.ensureTotalCapacity(self.list.items.len);
 
-                for (0..self.list.items.len) |i| {
-                    const score = self.search.stats.get(
-                        self.search.b,
-                        if (ply == 0) null else self.search.stack[ply - 1].move,
-                        self.list.items[i],
-                    );
-                    self.score_list.appendAssumeCapacity(score);
-                }
-                self.sort_moves();
+                try self.scoreMoves();
+                self.sortMoves();
 
                 self.stage = .Quiet;
             },
             .Quiet => {
+                if (self.skip_quiets) return null;
+
                 const move = self.list.pop();
                 self.current_hist = self.score_list.pop();
                 if (move == null) return move;
 
                 if ((self.tt == null or !self.tt.?.equals(move.?)) and
                     (self.killer == null or !self.killer.?.equals(move.?)))
+                {
+                    self.ret_stage = .Quiet;
                     return move;
+                }
             },
         }
 

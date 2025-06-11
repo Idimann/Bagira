@@ -54,8 +54,8 @@ pub inline fn deinit(alloc: std.mem.Allocator) void {
 }
 
 pub inline fn prefetch(b: *const bo.Board, comptime write: bool) void {
-    if (write) @prefetch(&TT[b.hash[b.hash_in] % TT_Size], .{ .rw = .write });
-    @prefetch(&TT[b.hash[b.hash_in] % TT_Size], .{ .rw = .read });
+    if (write) @prefetch(&TT[b.getHash() % TT_Size], .{ .rw = .write });
+    @prefetch(&TT[b.getHash() % TT_Size], .{ .rw = .read });
 }
 
 pub const TT_Result = struct {
@@ -68,13 +68,13 @@ pub fn clear() void {
 }
 
 pub inline fn probe(b: *const bo.Board) TT_Result {
-    const read = TT[b.hash[b.hash_in] % TT_Size];
+    const read = TT[b.getHash() % TT_Size];
 
     if (!read.valid()) return .{
         .reader = null,
         .usable = false,
     };
-    if (@as(u32, @intCast(b.hash[b.hash_in] & HashMask)) != read.val.hash) return .{
+    if (@as(u32, @intCast(b.getHash() & HashMask)) != read.val.hash) return .{
         .reader = read,
         .usable = false,
     };
@@ -95,11 +95,11 @@ inline fn put(
     upper_bound: i32,
     insert_time: u7,
 ) void {
-    const index = b.hash[b.hash_in] % TT_Size;
+    const index = b.getHash() % TT_Size;
     var entry = TT_Entry{
         .check = 0,
         .val = .{
-            .hash = @intCast(b.hash[b.hash_in] & HashMask),
+            .hash = @intCast(b.getHash() & HashMask),
             .score = std.math.clamp(score, lower_bound, upper_bound),
             .eval = eval,
             .move = if (move) |mov| mov else std.mem.zeroes(tp.Move),

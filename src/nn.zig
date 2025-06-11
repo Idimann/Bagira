@@ -2,7 +2,7 @@ const std = @import("std");
 const tp = @import("types.zig");
 const bo = @import("board.zig");
 
-pub const SCALE: i32 = 400;
+pub const SCALE = 400;
 const QA: i16 = 255;
 const QB: i16 = 64;
 

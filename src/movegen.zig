@@ -472,6 +472,28 @@ pub const Maker = struct {
         return line_hit;
     }
 
+    pub inline fn attackedPawn(self: *const Maker) tp.BitBoard {
+        var ret = tp.BitBoard.new();
+
+        var iter = self.dat.their.op_and(self.b.pawns).without(self.pinned_line);
+        while (iter.popLsb()) |sq| {
+            var hit = (if (self.b.side == .White)
+                ta.PawnAttacksBlack[@intFromEnum(sq)]
+            else
+                ta.PawnAttacksWhite[@intFromEnum(sq)]);
+            if (self.pinned_diag.check(sq)) {
+                if (sq.diagonal() == self.dat.our_king.diagonal())
+                    hit.v &= tp.DiagonalMask[sq.diagonal()].v
+                else
+                    hit.v &= tp.AntiDiagonalMask[sq.antiDiagonal()].v;
+            }
+
+            ret.v |= hit.v;
+        }
+
+        return ret;
+    }
+
     fn attack_count(self: *const Maker, sq: tp.Square, ig: tp.Square) usize {
         var ret: usize = 0;
 

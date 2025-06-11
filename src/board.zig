@@ -27,13 +27,27 @@ pub const Board = struct {
     side: Side,
 
     hash: [2048]u64,
+    pawn_hash: [2048]u64,
     hash_in: u12,
     move_rule: u8, //This is given in plies, not moves
+
+    pub inline fn getHash(self: *const Board) u64 {
+        return self.hash[self.hash_in];
+    }
+
+    pub inline fn getPawnHash(self: *const Board) u64 {
+        return self.pawn_hash[self.hash_in];
+    }
+
+    pub inline fn getNonPawnHash(self: *const Board) u64 {
+        return self.getHash() ^ self.getPawnHash();
+    }
 
     pub inline fn equal(self: *const Board, other: *const Board) bool {
         if (self.hash_in != other.hash_in) return false;
         for (0..self.hash_in) |i| {
             if (self.hash[i] != other.hash[i]) return false;
+            if (self.pawn_hash[i] != other.pawn_hash[i]) return false;
         }
 
         return self.w_pieces.v == other.w_pieces.v and
@@ -111,6 +125,7 @@ pub const Board = struct {
 
     fn initHash(self: *Board) void {
         self.hash[self.hash_in] = 0;
+        self.pawn_hash[self.hash_in] = 0;
         var iter = self.w_pieces.op_or(self.b_pieces);
         while (iter.popLsb()) |sq| {
             const in = @intFromEnum(sq);
@@ -129,6 +144,14 @@ pub const Board = struct {
                     .King => zbr.ZobristTable[5][in],
                     else => unreachable,
                 };
+
+                if (typ.typ == .Pawn) {
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][in];
+                    if (typ.white)
+                        self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[0][in]
+                    else
+                        self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[1][in];
+                }
             }
         }
 
@@ -140,7 +163,10 @@ pub const Board = struct {
         if (self.castle.bk) self.hash[self.hash_in] ^= zbr.CastleTable[2];
         if (self.castle.bq) self.hash[self.hash_in] ^= zbr.CastleTable[3];
 
-        if (self.side == .Black) self.hash[self.hash_in] ^= zbr.SideHash;
+        if (self.side == .Black) {
+            self.hash[self.hash_in] ^= zbr.SideHash;
+            self.pawn_hash[self.hash_in] ^= zbr.SideHash;
+        }
     }
 
     pub inline fn enPassant(self: *const Board) tp.BitBoard {
@@ -163,6 +189,7 @@ pub const Board = struct {
             .side = .White,
 
             .hash = std.mem.zeroes([2048]u64),
+            .pawn_hash = std.mem.zeroes([2048]u64),
             .hash_in = 0,
             .move_rule = 0,
         };
@@ -349,6 +376,7 @@ pub const Board = struct {
     pub fn applyNull(self: *Board) tp.Remove {
         self.hash_in += 1;
         self.hash[self.hash_in] = self.hash[self.hash_in - 1] ^ zbr.SideHash;
+        self.pawn_hash[self.hash_in] = self.pawn_hash[self.hash_in - 1] ^ zbr.SideHash;
 
         const pas = self.enPassant().lsb();
         const move_rule = self.move_rule;
@@ -373,6 +401,7 @@ pub const Board = struct {
     pub fn apply(self: *Board, m: tp.Move) tp.Remove {
         self.hash_in += 1;
         self.hash[self.hash_in] = self.hash[self.hash_in - 1] ^ zbr.SideHash;
+        self.pawn_hash[self.hash_in] = self.hash[self.hash_in - 1] ^ zbr.SideHash;
 
         const pas = self.enPassant().lsb();
         const cas = self.castle;
@@ -401,10 +430,26 @@ pub const Board = struct {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
                 if (black == .Moved or black == .Removed)
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
-                if (pa == .Moved or pa == .Both)
+                if (pa == .Moved or pa == .Both) {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
-                if (pa == .Moved or pa == .Removed)
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                    if (white == .Moved or white == .Both)
+                        self.pawn_hash[self.hash_in] ^=
+                            zbr.ZobristTable[0][@intFromEnum(m.from)]
+                    else if (black == .Moved or black == .Both)
+                        self.pawn_hash[self.hash_in] ^=
+                            zbr.ZobristTable[1][@intFromEnum(m.from)];
+                }
+                if (pa == .Moved or pa == .Removed) {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.to)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.to)];
+                    if (white == .Moved or white == .Removed)
+                        self.pawn_hash[self.hash_in] ^=
+                            zbr.ZobristTable[0][@intFromEnum(m.to)]
+                    else if (black == .Moved or black == .Removed)
+                        self.pawn_hash[self.hash_in] ^=
+                            zbr.ZobristTable[1][@intFromEnum(m.to)];
+                }
                 if (di == .Moved or di == .Both)
                     self.hash[self.hash_in] ^= zbr.ZobristTable[3][@intFromEnum(m.from)];
                 if (di == .Moved or di == .Removed)
@@ -484,26 +529,36 @@ pub const Board = struct {
                     _ = self.w_pieces.move(m.from, m.to);
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
 
                     const hit = m.to.getApply(.South);
                     _ = self.b_pieces.unset(hit);
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(hit)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(hit)];
 
                     _ = self.pawns.unset(hit).move(m.from, m.to);
                     self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(hit)];
                     self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.to)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
                 } else {
                     _ = self.b_pieces.move(m.from, m.to);
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
 
                     const hit = m.to.getApply(.North);
                     _ = self.w_pieces.unset(hit);
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(hit)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(hit)];
 
                     _ = self.pawns.unset(hit).move(m.from, m.to);
                     self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(hit)];
                     self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.to)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
                 }
             },
             .CastleKingside => {
@@ -591,16 +646,21 @@ pub const Board = struct {
                 const li = self.lines.checkUnset(m.to);
                 _ = self.pawns.unset(m.from);
 
-                if (white == .Moved or white == .Both)
+                if (white == .Moved or white == .Both) {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                }
                 if (white == .Moved or white == .Removed)
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
-                if (black == .Moved or black == .Both)
+                if (black == .Moved or black == .Both) {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                }
                 if (black == .Moved or black == .Removed)
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
 
                 self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
 
                 if (white == .Removed or black == .Removed) {
                     if (di == .Removed)
@@ -619,16 +679,21 @@ pub const Board = struct {
                 _ = self.pawns.unset(m.from);
                 _ = self.diags.set(m.to);
 
-                if (white == .Moved or white == .Both)
+                if (white == .Moved or white == .Both) {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                }
                 if (white == .Moved or white == .Removed)
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
-                if (black == .Moved or black == .Both)
+                if (black == .Moved or black == .Both) {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                }
                 if (black == .Moved or black == .Removed)
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
 
                 self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
                 self.hash[self.hash_in] ^= zbr.ZobristTable[3][@intFromEnum(m.to)];
 
                 if (white == .Removed or black == .Removed) {
@@ -648,16 +713,21 @@ pub const Board = struct {
                 _ = self.pawns.unset(m.from);
                 _ = self.lines.set(m.to);
 
-                if (white == .Moved or white == .Both)
+                if (white == .Moved or white == .Both) {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                }
                 if (white == .Moved or white == .Removed)
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
-                if (black == .Moved or black == .Both)
+                if (black == .Moved or black == .Both) {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                }
                 if (black == .Moved or black == .Removed)
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
 
                 self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
+                self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
                 self.hash[self.hash_in] ^= zbr.ZobristTable[4][@intFromEnum(m.to)];
 
                 if (white == .Removed or black == .Removed) {
@@ -678,17 +748,21 @@ pub const Board = struct {
                 _ = self.diags.set(m.to);
                 _ = self.lines.set(m.to);
 
-                if (white == .Moved or white == .Both)
+                if (white == .Moved or white == .Both) {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.from)];
+                }
                 if (white == .Moved or white == .Removed)
                     self.hash[self.hash_in] ^= zbr.ZobristTable[0][@intFromEnum(m.to)];
-                if (black == .Moved or black == .Both)
+                if (black == .Moved or black == .Both) {
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                    self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.from)];
+                }
                 if (black == .Moved or black == .Removed)
                     self.hash[self.hash_in] ^= zbr.ZobristTable[1][@intFromEnum(m.to)];
 
                 self.hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
-                self.hash[self.hash_in] ^= zbr.ZobristTable[3][@intFromEnum(m.to)];
+                self.pawn_hash[self.hash_in] ^= zbr.ZobristTable[2][@intFromEnum(m.from)];
                 self.hash[self.hash_in] ^= zbr.ZobristTable[4][@intFromEnum(m.to)];
 
                 if (white == .Removed or black == .Removed) {
@@ -884,8 +958,8 @@ pub const Board = struct {
         std.debug.print("Kings\n", .{});
         b.w_king.toBoard().op_or(b.b_king.toBoard()).print();
         std.debug.print(
-            "Move Rule: {}, Hash: {}, Hash Index: {}\n",
-            .{ b.move_rule, b.hash[b.hash_in], b.hash_in },
+            "Move Rule: {}, Hash: {}, Pawn Hash: {}, Hash Index: {}\n",
+            .{ b.move_rule, b.getHash(), b.getPawnHash(), b.hash_in },
         );
     }
 };

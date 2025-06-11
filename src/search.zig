@@ -63,6 +63,7 @@ pub const Searcher = struct {
     thread: *po.Thread,
 
     stats: hi.Stats,
+    corrections: hi.Corrections,
 
     // The shift is for overflow protection
     pub const MateVal = std.math.maxInt(i32) >> 16;
@@ -79,6 +80,7 @@ pub const Searcher = struct {
             .start_ply = thread.board.hash_in,
             .thread = thread,
             .stats = hi.Stats.init(),
+            .corrections = hi.Corrections.init(),
         };
     }
 
@@ -100,7 +102,7 @@ pub const Searcher = struct {
             var once = false;
 
             while (iter <= self.b.move_rule) {
-                if (self.b.hash[self.b.hash_in - iter] == self.b.hash[self.b.hash_in]) {
+                if (self.b.hash[self.b.hash_in - iter] == self.b.getHash()) {
                     if (!root or once)
                         return true
                     else
@@ -170,7 +172,13 @@ pub const Searcher = struct {
     inline fn evaluate(self: *Searcher) i32 {
         const mate = comptime mateVal(std.math.maxInt(u12));
         const score = self.nnw.output(self.b);
-        return std.math.clamp(ev.adjust(score, self.b), mate + 1, -mate - 1);
+
+        const ply = self.b.hash_in - self.start_ply;
+        const prev = if (ply >= 2) self.stack[ply - 2].move else null;
+        const move = if (ply >= 1) self.stack[ply - 1].move else null;
+        const corr = @divFloor(self.corrections.get(self.b, prev, move), 16);
+
+        return std.math.clamp(score + corr, mate + 1, -mate - 1);
     }
 
     pub fn quietSearch(self: *Searcher, a: i32, b: i32) !i32 {
@@ -182,7 +190,7 @@ pub const Searcher = struct {
         // Check for insufficient material
         if (self.materialDraw()) return drawVal();
 
-        if (ply >= MaxDepth) return self.evaluate();
+        if (ply >= MaxDepth) return ev.adjust(self.evaluate(), self.b);
 
         // Mate distance pruning (These are the best possible vals at this ply)
         var alpha = @max(a, mateVal(ply));
@@ -217,7 +225,10 @@ pub const Searcher = struct {
             tte.reader.?.usable(tte_score, alpha, beta))
             return tte_score;
 
-        const static = if (tte_fine) tte.reader.?.val.eval else self.evaluate();
+        const static = ev.adjust(
+            if (tte_fine) tte.reader.?.val.eval else self.evaluate(),
+            self.b,
+        );
         const eval = if (tte_fine and tte.reader.?.usable(tte_score, static - 1, static))
             tte_score
         else
@@ -236,10 +247,10 @@ pub const Searcher = struct {
         var pick = pi.Picker.init(.QuietTT, self, &gen, hash_move);
         defer pick.deinit();
 
-        const futility = eval + ev.CentiPawn * 11;
-
         var best_move: ?tp.Move = null;
         var best_score = alpha;
+
+        const futility = eval + ev.CentiPawn * 8;
         var move_counter: u8 = 0;
 
         // Removing killer move
@@ -248,26 +259,27 @@ pub const Searcher = struct {
         const lower_bound = alpha;
         const upper_bound = beta;
 
-        var stage = pick.stage;
         while (try pick.nextMove()) |move| {
-            self.stack[ply].stage = stage;
+            self.stack[ply].stage = pick.ret_stage;
             self.stack[ply].hist_score = pick.current_hist;
             self.stack[ply].move = move;
-
-            stage = pick.stage;
+            move_counter += 1;
 
             // Pruning
-            if (!isLoss(best_score)) {
+            const followup = self.stack[ply - 1].move != null and
+                self.stack[ply - 1].move.?.to == move.to;
+            if (!isLoss(best_score) and !followup) {
+                // Move count pruning
+                if (!move.typ.promotion() and move_counter > 2) continue;
+
                 // Futility pruning
-                const capture = self.b.w_pieces.check(move.to) or
-                    self.b.b_pieces.check(move.to);
-                if (!self.stack[ply].in_check and capture) {
+                if (!self.stack[ply].in_check and !self.b.isQuiet(move)) {
                     if (futility +
                         ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
                         continue;
                 }
 
-                // SEE Pruning
+                // SEE
                 if (!see.see(self.b, move, &gen, 0)) continue;
             }
 
@@ -280,7 +292,6 @@ pub const Searcher = struct {
             self.nnw.remove(self.b, move, undo);
             self.b.remove(move, undo);
 
-            move_counter += 1;
             if (score > best_score) {
                 best_score = score;
 
@@ -379,15 +390,18 @@ pub const Searcher = struct {
         }
 
         // Trust the tt entry if it's usable
-        if (!root and
+        if (!pv and
+            !root and
             self.stack[ply].excluded == null and
             tte_fine and
-            (!pv or (tte.reader.?.val.typ == .Exact)) and
             tte.reader.?.val.depth >= depth and
             tte.reader.?.usable(tte_score, alpha, beta))
             return tte_score;
 
-        const static = if (tte_fine) tte.reader.?.val.eval else self.evaluate();
+        const static = ev.adjust(
+            if (tte_fine) tte.reader.?.val.eval else self.evaluate(),
+            self.b,
+        );
         const eval = if (tte_fine and tte.reader.?.usable(tte_score, static - 1, static))
             tte_score
         else
@@ -404,7 +418,7 @@ pub const Searcher = struct {
             if (cutnode and depth >= 8) depth -= 1;
         }
 
-        // Pruning
+        // Real Pruning
         if (!self.stack[ply].in_check and
             !root and
             !pv and
@@ -483,7 +497,7 @@ pub const Searcher = struct {
                     self.b.remove(move, undo);
 
                     if (score >= probcut_beta) {
-                        if (isLoss(score)) return score;
+                        if (isMate(score)) return score;
 
                         // Store ProbCut data
                         tt.store(
@@ -520,6 +534,7 @@ pub const Searcher = struct {
         var histories = try std.ArrayList(tp.Move).initCapacity(self.alloc, 64);
         defer histories.deinit();
 
+        const futility = eval + ev.CentiPawn * 11;
         var move_counter: u8 = 0;
 
         // Removing killer move
@@ -528,14 +543,17 @@ pub const Searcher = struct {
         const lower_bound = alpha;
         const upper_bound = beta;
 
-        var stage = pick.stage;
         while (try pick.nextMove()) |move| {
+            // Skip the excluded move
+            if (self.stack[ply].excluded != null and
+                move.equals(self.stack[ply].excluded.?)) continue;
+
             const start_nodes = self.thread.nodes;
 
-            self.stack[ply].stage = stage;
+            self.stack[ply].stage = pick.ret_stage;
             self.stack[ply].hist_score = pick.current_hist;
             self.stack[ply].move = move;
-            stage = pick.stage;
+            move_counter += 1;
 
             var next_depth = depth - 1;
             var score: i32 = undefined;
@@ -554,25 +572,48 @@ pub const Searcher = struct {
                 if (cutnode) R += 2;
                 if (quiet and move_counter > quiet_count) R += 2;
                 if (tt_capture) R += 1;
-                if (!pv or (tte_fine and tte.reader.?.val.typ == .Exact)) R += 2;
+                if (!pv and !(tte_fine and tte.reader.?.val.typ == .Exact)) R += 2;
                 if (!improving) R += 1;
+                // We do wanna reduce these more
+                if (self.stack[ply].in_check) R += 1;
 
                 // Reduce less
-                if (self.stack[ply].in_check) R -= 1;
-                if (self.stack[ply].stage == .Killer) R -= 1;
+                R += switch (self.stack[ply].stage.?) {
+                    .TT => -2,
+                    .GoodCaptures => -1,
+                    .Killer => -2,
+                    .BadCaptures => 0,
+                    .Quiets => 1,
+                    else => unreachable,
+                };
                 R = @min(@max(next_depth - 1, 0), @max(R, 1));
                 r_depth = next_depth - R;
             }
 
-            // Skips
-            if (self.stack[ply].excluded != null and
-                move.equals(self.stack[ply].excluded.?)) continue;
-            if (!isLoss(best_score)) {
-                if (!see.see(
+            // Pruning
+            if (!root and !isLoss(best_score) and !self.stalemateDanger()) {
+                // Move count pruning
+                // if (!improving and
+                //     !self.stack[ply].in_check and
+                //     move_counter >= @divFloor(3 + depth * depth, 2))
+                //     pick.skip_quiets = true;
+
+                // Futility pruning
+                if (r_depth < 7 and !self.stack[ply].in_check and !self.b.isQuiet(move)) {
+                    if (futility + 8 * ev.CentiPawn * r_depth +
+                        ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
+                        continue;
+                }
+
+                // SEE pruning
+                const followup = ply >= 1 and
+                    self.stack[ply - 1].move != null and
+                    self.stack[ply - 1].move.?.to == move.to;
+                if (!followup and !see.see(
                     self.b,
                     move,
                     &gen,
-                    Prunes[@intFromBool(quiet)][@intCast(r_depth)],
+                    Prunes[@intFromBool(!quiet)][@intCast(r_depth)],
                 )) continue;
             }
 
@@ -627,10 +668,10 @@ pub const Searcher = struct {
 
                 if (score > alpha and r_depth < next_depth)
                     score = -try self.search(-alpha - 1, -alpha, next_depth, !cutnode);
-            } else if (!pv or move_counter > 0)
+            } else if (!pv or move_counter > 1)
                 score = -try self.search(-alpha - 1, -alpha, next_depth, !cutnode);
 
-            if (pv and (move_counter == 0 or score > alpha))
+            if (pv and (move_counter == 1 or score > alpha))
                 score = -try self.search(-beta, -alpha, next_depth, false);
 
             self.nnw.remove(self.b, move, undo);
@@ -657,7 +698,7 @@ pub const Searcher = struct {
                         @divFloor(rm.avg_score_sq + score * abs_score, 2);
                 }
 
-                if (move_counter == 0 or score > alpha) {
+                if (move_counter == 1 or score > alpha) {
                     rm.score = score;
                     rm.depth = depth;
                     rm.pv_size = self.stack[1].pv_size;
@@ -668,7 +709,6 @@ pub const Searcher = struct {
             }
 
             try histories.append(move);
-            move_counter += 1;
             if (score > best_score) {
                 best_score = score;
 
@@ -690,7 +730,7 @@ pub const Searcher = struct {
                             move_counter,
                             @divFloor(score - eval, ev.CentiPawn),
                         );
-                        if (ply > 0) self.stack[ply - 1].killer = move;
+                        if (ply >= 1) self.stack[ply - 1].killer = move;
                         break;
                     }
                 }
@@ -702,6 +742,17 @@ pub const Searcher = struct {
             if (self.stack[ply].excluded != null) return alpha;
 
             return if (self.stack[ply].in_check) mateVal(ply) else drawVal();
+        }
+
+        // Update Corrections
+        const prev = if (ply >= 2) self.stack[ply - 2].move else null;
+        const move = if (ply >= 1) self.stack[ply - 1].move else null;
+        if (!self.stack[ply].in_check and
+            (best_move == null or self.b.isQuiet(best_move.?)) and
+            !(best_score >= beta and best_score <= static) and
+            !(best_move == null and best_score >= static))
+        {
+            self.corrections.update(self.b, prev, move, depth, best_score, static);
         }
 
         // TT insert

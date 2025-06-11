@@ -12,7 +12,7 @@ pub fn main() !void {
     tab.initLines();
     tab.initDiags();
     try zbr.init();
-    try tt.init(128, std.heap.c_allocator);
+    try tt.init(64, std.heap.c_allocator);
     defer tt.deinit(std.heap.c_allocator);
 
     var nnw = try nn.NN.init("networks/", "v2_2.bin");
