@@ -176,7 +176,7 @@ pub const Searcher = struct {
         const ply = self.b.hash_in - self.start_ply;
         const prev = if (ply >= 2) self.stack[ply - 2].move else null;
         const move = if (ply >= 1) self.stack[ply - 1].move else null;
-        const corr = @divFloor(self.corrections.get(self.b, prev, move), 16);
+        const corr = @divFloor(self.corrections.get(self.b, prev, move), 12);
 
         return std.math.clamp(score + corr, mate + 1, -mate - 1);
     }
@@ -198,6 +198,7 @@ pub const Searcher = struct {
         if (alpha >= beta) return alpha;
 
         const gen = mv.Maker.init(self.b);
+        const pawn_attacked = gen.attackedPawn();
 
         const pv = b != a + 1;
         self.stack[ply].in_check = gen.checks > 0;
@@ -220,7 +221,8 @@ pub const Searcher = struct {
         }
 
         // Trust the tt entry if it's usable
-        if (!pv and
+        if (self.b.move_rule < 90 and
+            !pv and
             tte_fine and
             tte.reader.?.usable(tte_score, alpha, beta))
             return tte_score;
@@ -244,24 +246,25 @@ pub const Searcher = struct {
         }
         if (alpha >= beta) return alpha;
 
-        var pick = pi.Picker.init(.QuietTT, self, &gen, hash_move);
+        var pick = pi.Picker.init(.QuietSearchTT, self, &gen, hash_move, pawn_attacked);
         defer pick.deinit();
 
         var best_move: ?tp.Move = null;
         var best_score = alpha;
 
+        // Constants for pruning
         const futility = eval + ev.CentiPawn * 8;
-        var move_counter: u8 = 0;
 
         // Removing killer move
         self.stack[ply].killer = null;
 
+        var move_counter: u8 = 0;
         const lower_bound = alpha;
         const upper_bound = beta;
 
         while (try pick.nextMove()) |move| {
             self.stack[ply].stage = pick.ret_stage;
-            self.stack[ply].hist_score = pick.current_hist;
+            self.stack[ply].hist_score = pick.current_val;
             self.stack[ply].move = move;
             move_counter += 1;
 
@@ -363,6 +366,7 @@ pub const Searcher = struct {
         if (alpha >= beta) return alpha;
 
         const gen = mv.Maker.init(self.b);
+        const pawn_attacked = gen.attackedPawn();
 
         self.stack[ply].in_check = gen.checks > 0;
         const pv = b != a + 1;
@@ -390,7 +394,8 @@ pub const Searcher = struct {
         }
 
         // Trust the tt entry if it's usable
-        if (!pv and
+        if (self.b.move_rule < 90 and
+            !pv and
             !root and
             self.stack[ply].excluded == null and
             tte_fine and
@@ -469,13 +474,19 @@ pub const Searcher = struct {
             const probcut_add = ev.CentiPawn * (8 - 2 * improve_int);
             const probcut_beta = beta + probcut_add;
             if (depth >= 3 and (!tte_fine or eval >= probcut_beta)) {
-                var pick = pi.Picker.init(.QuietTT, self, &gen, hash_move);
+                var pick = pi.Picker.init(
+                    .QuietSearchTT,
+                    self,
+                    &gen,
+                    hash_move,
+                    pawn_attacked,
+                );
                 defer pick.deinit();
 
                 var stage = pick.stage;
                 while (try pick.nextMove()) |move| {
                     self.stack[ply].stage = stage;
-                    self.stack[ply].hist_score = pick.current_hist;
+                    self.stack[ply].hist_score = pick.current_val;
                     self.stack[ply].move = move;
                     stage = pick.stage;
 
@@ -517,9 +528,10 @@ pub const Searcher = struct {
             }
         }
 
-        var pick = pi.Picker.init(.TT, self, &gen, hash_move);
+        var pick = pi.Picker.init(.TT, self, &gen, hash_move, pawn_attacked);
         defer pick.deinit();
 
+        // Constants for LMR
         const depth_sq = @as(i32, @intCast(depth)) * @as(i32, @intCast(depth));
         const quiet_count = if (improving)
             2 + depth_sq
@@ -528,18 +540,20 @@ pub const Searcher = struct {
         const tt_capture = tte_move and (!self.b.isQuiet(hash_move.?) or
             hash_move.?.typ.promotion());
 
+        // Constants for pruning
+        const futility = eval + ev.CentiPawn * 11;
+        const quiet_max = @divFloor(3 + depth_sq, 2);
+
         var best_move: ?tp.Move = null;
         var best_score: i32 = -MateVal;
 
         var histories = try std.ArrayList(tp.Move).initCapacity(self.alloc, 64);
         defer histories.deinit();
 
-        const futility = eval + ev.CentiPawn * 11;
-        var move_counter: u8 = 0;
-
         // Removing killer move
         self.stack[ply].killer = null;
 
+        var move_counter: u8 = 0;
         const lower_bound = alpha;
         const upper_bound = beta;
 
@@ -551,7 +565,7 @@ pub const Searcher = struct {
             const start_nodes = self.thread.nodes;
 
             self.stack[ply].stage = pick.ret_stage;
-            self.stack[ply].hist_score = pick.current_hist;
+            self.stack[ply].hist_score = pick.current_val;
             self.stack[ply].move = move;
             move_counter += 1;
 
@@ -565,7 +579,7 @@ pub const Searcher = struct {
                 const depth_index: u5 = @intCast(@min(31, depth));
                 const ply_index: u5 = @intCast(@min(31, ply));
                 R += Reductions[@intFromBool(quiet)][depth_index][ply_index];
-                if (pick.current_hist) |h|
+                if (pick.current_val) |h|
                     R -= @intCast(std.math.clamp(@divFloor(h, hi.CentiHist), -2, 2));
 
                 // Reduce more
@@ -593,16 +607,27 @@ pub const Searcher = struct {
             // Pruning
             if (!root and !isLoss(best_score) and !self.stalemateDanger()) {
                 // Move count pruning
-                // if (!improving and
-                //     !self.stack[ply].in_check and
-                //     move_counter >= @divFloor(3 + depth * depth, 2))
-                //     pick.skip_quiets = true;
+                if (!improving and move_counter >= quiet_max)
+                    pick.skip_quiets = true;
 
                 // Futility pruning
-                if (r_depth < 7 and !self.stack[ply].in_check and !self.b.isQuiet(move)) {
-                    if (futility + 8 * ev.CentiPawn * r_depth +
-                        ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
-                        continue;
+                if (!self.b.isQuiet(move)) {
+                    if (r_depth < 7 and !self.stack[ply].in_check) {
+                        const futil_val = futility + 8 * ev.CentiPawn * r_depth +
+                            ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))];
+                        if (futil_val <= alpha) continue;
+                    }
+                } else {
+                    if (r_depth < 12 and !self.stack[ply].in_check) {
+                        const futil_val = futility + 6 * ev.CentiPawn * r_depth;
+                        if (futil_val <= alpha) {
+                            if (!isMate(best_score) and
+                                !isMate(futil_val) and
+                                best_score < futil_val)
+                                best_score = futil_val;
+                            continue;
+                        }
+                    }
                 }
 
                 // SEE pruning
@@ -722,14 +747,6 @@ pub const Searcher = struct {
                     }
 
                     if (score >= beta) {
-                        self.stats.update(
-                            self.b,
-                            &histories,
-                            if (root) null else self.stack[ply - 1].move,
-                            depth,
-                            move_counter,
-                            @divFloor(score - eval, ev.CentiPawn),
-                        );
                         if (ply >= 1) self.stack[ply - 1].killer = move;
                         break;
                     }
@@ -742,6 +759,18 @@ pub const Searcher = struct {
             if (self.stack[ply].excluded != null) return alpha;
 
             return if (self.stack[ply].in_check) mateVal(ply) else drawVal();
+        }
+
+        if (best_move != null) {
+            self.stats.update(
+                self.b,
+                best_move.?,
+                &histories,
+                if (root) null else self.stack[ply - 1].move,
+                depth,
+                move_counter,
+                @divFloor(best_score - eval, ev.CentiPawn),
+            );
         }
 
         // Update Corrections

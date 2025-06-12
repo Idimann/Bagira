@@ -1,6 +1,7 @@
 const std = @import("std");
 const tp = @import("types.zig");
 const mv = @import("movegen.zig");
+const pi = @import("movepick.zig");
 const bo = @import("board.zig");
 const se = @import("search.zig");
 const nn = @import("nn.zig");
@@ -172,6 +173,14 @@ pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !?RootMove {
     }
 
     std.debug.print("Searched nodes: {}\n", .{best.nodes});
+
+    const gen = mv.Maker.init(b);
+    var pick = pi.Picker.init(.TT, &Pool[0].search, &gen, null, gen.attackedPawn());
+    while (try pick.nextMove()) |move| {
+        move.print();
+        std.debug.print(" {any} {any}\n", .{ pick.ret_stage, pick.current_val });
+    }
+    pick.deinit();
 
     const ret = best.best_root;
     deinitPool();

@@ -141,7 +141,7 @@ pub const Corrections = struct {
     }
 };
 
-pub const CentiHist = 1 << 6;
+pub const CentiHist = 1 << 4;
 
 pub const Stats = struct {
     butterfly: ButterflyHistory,
@@ -231,6 +231,7 @@ pub const Stats = struct {
     pub fn update(
         self: *Stats,
         b: *const bo.Board,
+        main: tp.Move,
         list: *const std.ArrayList(tp.Move),
         prev: ?tp.Move,
         depth: i12,
@@ -241,10 +242,9 @@ pub const Stats = struct {
         const depth_sq = big_depth * big_depth;
 
         // Bonuses
-        var bonus = depth_sq * (2 - @as(i3, @intCast(@intFromBool(move_count <= 3))));
-        bonus += @min(diff, 49);
+        var bonus = depth_sq * @min(move_count, 3);
+        bonus += @min(diff, 95);
 
-        const main = list.items[list.items.len - 1];
         const quiet = b.isQuiet(main);
         const butterfly = self.butterflyIn(b, main);
 
@@ -266,8 +266,9 @@ pub const Stats = struct {
 
         const quiet_factor: i3 = @intCast(@intFromBool(quiet));
         // Maluses
-        for (0..(list.items.len - 1)) |i| {
+        for (0..list.items.len) |i| {
             const m = list.items[i];
+            if (m.equals(main)) continue;
 
             const this_quiet = b.isQuiet(m);
 
