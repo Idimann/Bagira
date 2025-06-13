@@ -769,7 +769,6 @@ pub const Searcher = struct {
                 if (root) null else self.stack[ply - 1].move,
                 depth,
                 move_counter,
-                @divFloor(best_score - eval, ev.CentiPawn),
             );
         }
 

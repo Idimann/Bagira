@@ -236,14 +236,12 @@ pub const Stats = struct {
         prev: ?tp.Move,
         depth: i12,
         move_count: u8,
-        diff: i32,
     ) void {
         const big_depth: i32 = @intCast(depth);
         const depth_sq = big_depth * big_depth;
 
         // Bonuses
-        var bonus = depth_sq * @min(move_count, 3);
-        bonus += @min(diff, 95);
+        const bonus: i32 = @max(depth_sq * @min(move_count, 16) + 16 * big_depth, 480);
 
         const quiet = b.isQuiet(main);
         const butterfly = self.butterflyIn(b, main);
@@ -256,7 +254,7 @@ pub const Stats = struct {
             const move = self.moveIn(b, main);
             const pawn = self.pawnIn(b, main);
             move.* += gravity(MoveMax, bonus, move.*);
-            pawn.* += gravity(PawnMax, bonus, move.*);
+            pawn.* += gravity(PawnMax, bonus, pawn.*);
 
             if (prev) |p| {
                 const followup = self.followupIn(b, p, main);
@@ -271,20 +269,22 @@ pub const Stats = struct {
             if (m.equals(main)) continue;
 
             const this_quiet = b.isQuiet(m);
-
             const this_factor: i3 = @intCast(@intFromBool(this_quiet));
-            const malus = big_depth * (1 + quiet_factor - this_factor);
+            const malus = @as(i32, @max(
+                depth_sq * (5 - @min(move_count, 4)) + big_depth,
+                120,
+            )) * (1 + quiet_factor - this_factor);
 
             const this_butterfly = self.butterflyIn(b, m);
             this_butterfly.* += gravity(ButterflyMax, -malus, this_butterfly.*);
             if (!this_quiet) {
-                const capture = self.captureIn(b, main);
+                const capture = self.captureIn(b, m);
                 capture.* += gravity(ButterflyMax, -malus, capture.*);
             } else {
-                const move = self.moveIn(b, main);
-                const pawn = self.pawnIn(b, main);
+                const move = self.moveIn(b, m);
+                const pawn = self.pawnIn(b, m);
                 move.* += gravity(MoveMax, -malus, move.*);
-                pawn.* += gravity(PawnMax, -malus, move.*);
+                pawn.* += gravity(PawnMax, -malus, pawn.*);
 
                 if (prev) |p| {
                     const followup = self.followupIn(b, p, m);
