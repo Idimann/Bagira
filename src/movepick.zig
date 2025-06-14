@@ -25,6 +25,11 @@ pub const Stage = enum {
     GenQuiets,
     Quiets,
 
+    // ProbCut
+    ProbCutTT,
+    GenProbCut,
+    ProbCut,
+
     // For quiet search
     QuietSearchTT,
     GenQuietSearch,
@@ -46,13 +51,15 @@ pub const Picker = struct {
     searched_killer: bool,
     skip_quiets: bool,
     current_val: ?i32,
+    threshold: ?i32,
 
-    pub inline fn init(
+    pub fn init(
         stage: Stage,
         search: *const se.Searcher,
         gen: *const mv.Maker,
         hash_move: ?tp.Move,
         pawn_attacked: tp.BitBoard,
+        threshold: ?i32,
     ) Picker {
         const ply = search.b.hash_in - search.start_ply;
 
@@ -70,6 +77,7 @@ pub const Picker = struct {
             .searched_killer = false,
             .skip_quiets = false,
             .current_val = null,
+            .threshold = threshold,
         };
     }
 
@@ -149,6 +157,8 @@ pub const Picker = struct {
     }
 
     pub fn nextMove(self: *Picker) !?tp.Move {
+        @setEvalBranchQuota(2048);
+
         switch (self.stage) {
             .TT => {
                 self.stage = .GenCaptures;
@@ -169,7 +179,12 @@ pub const Picker = struct {
             },
             .GoodCaptures => {
                 const picked = self.pickMove();
-                if (picked == null or self.score_list.items[picked.?] < 0)
+                if (picked == null or !see.see(
+                    self.search.b,
+                    self.list.items[picked.?],
+                    self.gen,
+                    @divFloor(-self.score_list.items[picked.?], hi.CentiHist),
+                ))
                     self.stage = .Killer
                 else {
                     self.current_val = self.score_list.swapRemove(picked.?);
@@ -220,6 +235,38 @@ pub const Picker = struct {
                     return self.list.swapRemove(picked.?);
                 }
             },
+            .ProbCutTT => {
+                self.stage = .GenProbCut;
+                if (self.tt != null and self.gen.isLegal(self.tt.?)) {
+                    self.current_val = null;
+                    if (!self.searched_killer or !self.killer.?.equals(self.tt.?)) {
+                        self.ret_stage = .ProbCutTT;
+                        return self.tt;
+                    }
+                }
+            },
+            .GenProbCut => {
+                self.reset();
+                try self.gen.gen(&self.list, .Capture);
+                try self.scoreMoves();
+
+                self.stage = .ProbCut;
+            },
+            .ProbCut => {
+                const picked = self.pickMove();
+                if (picked == null or !see.see(
+                    self.search.b,
+                    self.list.items[picked.?],
+                    self.gen,
+                    self.threshold.?,
+                ))
+                    return null
+                else {
+                    self.current_val = self.score_list.swapRemove(picked.?);
+                    self.ret_stage = .ProbCut;
+                    return self.list.swapRemove(picked.?);
+                }
+            },
             .QuietSearchTT => {
                 self.stage = .GenQuietSearch;
                 if (self.tt != null and self.gen.isLegal(self.tt.?)) {
@@ -231,14 +278,11 @@ pub const Picker = struct {
                 }
             },
             .GenQuietSearch => {
-                if (self.skip_quiets) return null;
-
                 self.reset();
                 if (self.gen.checks > 0)
                     try self.gen.gen(&self.list, .Either)
                 else
-                    try self.gen.gen(&self.list, .Quiet);
-                try self.gen.gen(&self.list, .Castle);
+                    try self.gen.gen(&self.list, .Capture);
 
                 try self.scoreMoves();
 

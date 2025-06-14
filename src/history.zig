@@ -5,7 +5,7 @@ const ev = @import("eval.zig");
 
 // This is adressed by [side][from][to] (All moves)
 const ButterflyHistory = [2][64][64]i32;
-const ButterflyMax = (1 << 10);
+const ButterflyMax = (1 << 7);
 
 // This is adressed by [side][piece][piece_to][to] (Captures)
 const CaptureHistory = [2][6][5][64]i32;
@@ -235,13 +235,10 @@ pub const Stats = struct {
         list: *const std.ArrayList(tp.Move),
         prev: ?tp.Move,
         depth: i12,
-        move_count: u8,
     ) void {
-        const big_depth: i32 = @intCast(depth);
-        const depth_sq = big_depth * big_depth;
-
         // Bonuses
-        const bonus: i32 = @max(depth_sq * @min(move_count, 16) + 16 * big_depth, 480);
+        const big_depth: i32 = @intCast(depth);
+        const bonus = std.math.clamp(big_depth * (big_depth + 48) - 30, 0, 428);
 
         const quiet = b.isQuiet(main);
         const butterfly = self.butterflyIn(b, main);
@@ -262,18 +259,15 @@ pub const Stats = struct {
             }
         }
 
-        const quiet_factor: i3 = @intCast(@intFromBool(quiet));
         // Maluses
         for (0..list.items.len) |i| {
             const m = list.items[i];
             if (m.equals(main)) continue;
 
             const this_quiet = b.isQuiet(m);
-            const this_factor: i3 = @intCast(@intFromBool(this_quiet));
-            const malus = @as(i32, @max(
-                depth_sq * (5 - @min(move_count, 4)) + big_depth,
-                120,
-            )) * (1 + quiet_factor - this_factor);
+            if (!quiet and this_quiet) continue;
+            var malus = bonus;
+            if (quiet == this_quiet) malus = @divFloor(malus, 2);
 
             const this_butterfly = self.butterflyIn(b, m);
             this_butterfly.* += gravity(ButterflyMax, -malus, this_butterfly.*);

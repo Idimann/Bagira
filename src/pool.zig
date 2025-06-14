@@ -111,7 +111,6 @@ fn initPool(b: *const bo.Board, nnw: *nn.NN) !bool {
 
 inline fn deinitPool() void {
     inline for (0..PoolSize) |i| {
-        Pool[i].thread.?.join();
         Pool[i].search.deinit();
         Pool[i].root_moves.deinit();
     }
@@ -130,6 +129,7 @@ inline fn startSearch() !void {
 inline fn stopSearch() void {
     for (0..PoolSize) |i| {
         Pool[i].stopped = true;
+        Pool[i].thread.?.join();
     }
 }
 
@@ -148,9 +148,7 @@ pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !?RootMove {
 
     // Thread voting
     var worst_score: i32 = std.math.maxInt(i32);
-    inline for (0..PoolSize) |i| {
-        worst_score = @min(worst_score, Pool[i].best_root.score);
-    }
+    inline for (0..PoolSize) |i| worst_score = @min(worst_score, Pool[i].best_root.score);
 
     var votes = std.AutoHashMap(tp.Move, i32).init(std.heap.c_allocator);
     defer votes.deinit();
@@ -174,8 +172,9 @@ pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !?RootMove {
 
     std.debug.print("Searched nodes: {}\n", .{best.nodes});
 
-    const gen = mv.Maker.init(b);
-    var pick = pi.Picker.init(.TT, &Pool[0].search, &gen, null, gen.attackedPawn());
+    best.board = b.*;
+    const gen = mv.Maker.init(&best.board);
+    var pick = pi.Picker.init(.TT, &best.search, &gen, null, gen.attackedPawn(), null);
     while (try pick.nextMove()) |move| {
         move.print();
         std.debug.print(" {any} {any}\n", .{ pick.ret_stage, pick.current_val });

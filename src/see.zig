@@ -12,7 +12,7 @@ pub const SeeValue = [_]i32{
     ev.QueenBase,
     0,
 };
-pub fn see(
+pub inline fn see(
     b: *const bo.Board,
     move: tp.Move,
     gen: *const mv.Maker,

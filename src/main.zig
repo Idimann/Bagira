@@ -8,8 +8,6 @@ const zbr = @import("zobrist.zig");
 const po = @import("pool.zig");
 const tt = @import("tt.zig");
 
-const mv = @import("movegen.zig");
-
 pub fn main() !void {
     tab.initLines();
     tab.initDiags();
@@ -21,4 +19,5 @@ pub fn main() !void {
     var b = try bo.Board.fromFen(pos.start);
 
     try pl.play(&b, &nnw, .Black, 1000, false);
+    // try pl.selfPlay(&b, &nnw, 600, true);
 }

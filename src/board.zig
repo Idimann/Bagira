@@ -401,7 +401,7 @@ pub const Board = struct {
     pub fn apply(self: *Board, m: tp.Move) tp.Remove {
         self.hash_in += 1;
         self.hash[self.hash_in] = self.hash[self.hash_in - 1] ^ zbr.SideHash;
-        self.pawn_hash[self.hash_in] = self.hash[self.hash_in - 1] ^ zbr.SideHash;
+        self.pawn_hash[self.hash_in] = self.pawn_hash[self.hash_in - 1] ^ zbr.SideHash;
 
         const pas = self.enPassant().lsb();
         const cas = self.castle;
