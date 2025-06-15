@@ -45,36 +45,29 @@ pub const Maker = struct {
         const prom_rank = if (self.b.side == .White) tp.Rank.Rank8 else tp.Rank.Rank1;
         const double_rank = if (self.b.side == .White) tp.Rank.Rank2 else tp.Rank.Rank7;
 
-        if ((cap != .Noisy or next.rank() == prom_rank) and
-            p != .Diag and
-            (p != .Line or sq.rank() != self.dat.our_king.rank()))
+        // Main squares
+        if (p != .Diag and
+            (p != .Line or sq.rank() != self.dat.our_king.rank()) and
+            !self.dat.combi.check(next))
         {
-            // Main squares
-            if (!self.dat.combi.check(next)) {
-                const move = tp.Move{ .from = sq, .to = next, .typ = .Normal };
+            // Moving one forward
+            if ((cap != .Noisy or next.rank() == prom_rank) and self.al.check(next)) {
+                if (next.rank() == prom_rank) try list.appendSlice(&[_]tp.Move{
+                    .{ .from = sq, .to = next, .typ = .PromKnight },
+                    .{ .from = sq, .to = next, .typ = .PromBishop },
+                    .{ .from = sq, .to = next, .typ = .PromRook },
+                    .{ .from = sq, .to = next, .typ = .PromQueen },
+                }) else try list.append(.{ .from = sq, .to = next, .typ = .Normal });
+            }
+            // Moving two forward
+            if (cap != .Noisy and sq.rank() == double_rank) {
                 const next2 = if (self.b.side == .White)
-                    sq.getApplySafe(.NorthNorth)
+                    next.getApply(.North)
                 else
-                    sq.getApplySafe(.SouthSouth);
-                if (sq.rank() == double_rank and !self.dat.combi.check(next2.?)) {
-                    const move2 = tp.Move{ .from = sq, .to = next2.?, .typ = .Normal };
+                    next.getApply(.South);
 
-                    if (self.al.check(next) and self.al.check(next2.?))
-                        try list.appendSlice(&[_]tp.Move{ move, move2 })
-                    else if (self.al.check(next))
-                        try list.append(move)
-                    else if (self.al.check(next2.?))
-                        try list.append(move2);
-                } else if (self.al.check(next)) {
-                    if (next.rank() == prom_rank) {
-                        try list.appendSlice(&[_]tp.Move{
-                            .{ .from = sq, .to = next, .typ = .PromKnight },
-                            .{ .from = sq, .to = next, .typ = .PromBishop },
-                            .{ .from = sq, .to = next, .typ = .PromRook },
-                            .{ .from = sq, .to = next, .typ = .PromQueen },
-                        });
-                    } else try list.append(move);
-                }
+                if (!self.dat.combi.check(next2) and self.al.check(next2))
+                    try list.append(.{ .from = sq, .to = next2, .typ = .Normal });
             }
         }
 
