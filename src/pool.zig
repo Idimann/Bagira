@@ -170,16 +170,14 @@ pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !?RootMove {
         if (new_val > best_val or (new_val == best_val and better)) best = &Pool[i];
     }
 
-    std.debug.print("Searched nodes: {}\n", .{best.nodes});
-
-    best.board = b.*;
-    const gen = mv.Maker.init(&best.board);
-    var pick = pi.Picker.init(.TT, &best.search, &gen, null, gen.attackedPawn(), null);
-    while (try pick.nextMove()) |move| {
-        move.print();
-        std.debug.print(" {any} {any}\n", .{ pick.ret_stage, pick.current_val });
-    }
-    pick.deinit();
+    // best.board = b.*;
+    // const gen = mv.Maker.init(&best.board);
+    // var pick = pi.Picker.init(.TT, &best.search, &gen, null, gen.attackedPawn(), null);
+    // while (try pick.nextMove()) |move| {
+    //     move.print();
+    //     std.debug.print(" {any} {any}\n", .{ pick.ret_stage, pick.current_val });
+    // }
+    // pick.deinit();
 
     const ret = best.best_root;
     deinitPool();

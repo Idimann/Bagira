@@ -172,7 +172,7 @@ pub const Picker = struct {
             },
             .GenCaptures => {
                 self.reset();
-                try self.gen.gen(&self.list, .Capture);
+                try self.gen.gen(&self.list, .Noisy);
                 try self.scoreMoves();
 
                 self.stage = .GoodCaptures;
@@ -247,7 +247,7 @@ pub const Picker = struct {
             },
             .GenProbCut => {
                 self.reset();
-                try self.gen.gen(&self.list, .Capture);
+                try self.gen.gen(&self.list, .Noisy);
                 try self.scoreMoves();
 
                 self.stage = .ProbCut;
@@ -282,7 +282,7 @@ pub const Picker = struct {
                 if (self.gen.checks > 0)
                     try self.gen.gen(&self.list, .Either)
                 else
-                    try self.gen.gen(&self.list, .Capture);
+                    try self.gen.gen(&self.list, .Noisy);
 
                 try self.scoreMoves();
 

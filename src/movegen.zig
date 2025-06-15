@@ -23,7 +23,7 @@ pub const Data = packed struct {
     our_king: tp.Square,
 };
 
-pub const MoveType = enum { Quiet, Capture, Either, Castle };
+pub const MoveType = enum { Quiet, Noisy, Either, Castle };
 
 pub const Maker = struct {
     b: *const bo.Board,
@@ -45,7 +45,7 @@ pub const Maker = struct {
         const prom_rank = if (self.b.side == .White) tp.Rank.Rank8 else tp.Rank.Rank1;
         const double_rank = if (self.b.side == .White) tp.Rank.Rank2 else tp.Rank.Rank7;
 
-        if (cap != .Capture and
+        if ((cap != .Noisy or next.rank() == prom_rank) and
             p != .Diag and
             (p != .Line or sq.rank() != self.dat.our_king.rank()))
         {
@@ -213,7 +213,7 @@ pub const Maker = struct {
     ) !void {
         var iter = ta.KingAttacks[@intFromEnum(sq)]
             .without(self.dat.our);
-        if (cap == .Capture)
+        if (cap == .Noisy)
             iter.v &= self.dat.their.v
         else if (cap == .Quiet)
             iter = iter.without(self.dat.their);
@@ -248,7 +248,7 @@ pub const Maker = struct {
             var iter = ta.KnightAttacks[@intFromEnum(sq)]
                 .without(self.dat.our)
                 .op_and(self.al);
-            if (cap == .Capture)
+            if (cap == .Noisy)
                 iter.v &= self.dat.their.v
             else if (cap == .Quiet)
                 iter = iter.without(self.dat.their);
@@ -283,7 +283,7 @@ pub const Maker = struct {
             var iter = ta.getLine(sq, self.dat.combi)
                 .without(self.dat.our)
                 .op_and(self.al);
-            if (cap == .Capture)
+            if (cap == .Noisy)
                 iter.v &= self.dat.their.v
             else if (cap == .Quiet)
                 iter = iter.without(self.dat.their);
@@ -333,7 +333,7 @@ pub const Maker = struct {
             var iter = ta.getDiag(sq, self.dat.combi)
                 .without(self.dat.our)
                 .op_and(self.al);
-            if (cap == .Capture)
+            if (cap == .Noisy)
                 iter.v &= self.dat.their.v
             else if (cap == .Quiet)
                 iter = iter.without(self.dat.their);

@@ -273,9 +273,9 @@ pub const Searcher = struct {
             // Pruning
             const followup = self.stack[ply - 1].move != null and
                 self.stack[ply - 1].move.?.to == move.to;
-            if (!isLoss(best_score) and !followup) {
+            if (!isLoss(best_score) and !followup and !move.typ.promotion()) {
                 // Move count pruning
-                if (!move.typ.promotion() and move_counter > 2) continue;
+                if (move_counter > 2) continue;
 
                 // Futility pruning
                 if (!self.stack[ply].in_check and !self.b.isQuiet(move)) {
