@@ -20,10 +20,5 @@ pub const PieceValue = [_]i32{
 };
 
 pub inline fn adjust(input: i32, b: *const bo.Board) i32 {
-    if (b.move_rule < 10) return input;
-
-    const move_rule_adjust: f32 = (150 - @as(f32, @floatFromInt(b.move_rule))) / 150;
-    const ret_float: f32 = @floatFromInt(input);
-
-    return @intFromFloat(ret_float * move_rule_adjust);
+    return @divTrunc(input * (200 - @as(i32, @intCast(b.move_rule))), 200);
 }

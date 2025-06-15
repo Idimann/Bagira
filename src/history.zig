@@ -29,7 +29,7 @@ const CorrSize = 32768;
 
 // This is adressed by [side][pawn_index]
 const PawnCorrHistory = [2][CorrSize]i32;
-const PawnCorrMax = ev.PawnBase * 2;
+const PawnCorrMax = 2 * ev.PawnBase;
 
 // This is adressed by [side][non_pawn_index]
 const NonPawnCorrHistory = [2][CorrSize]i32;

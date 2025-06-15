@@ -184,7 +184,6 @@ pub const Searcher = struct {
 
     pub fn quietSearch(self: *Searcher, a: i32, b: i32) !i32 {
         const ply = self.b.hash_in - self.start_ply;
-        if (ply == 0) self.b.print_detailed();
 
         // Check for three fold repetition and 50 move rule
         if (self.historyDraw(false)) return drawVal();
@@ -704,6 +703,7 @@ pub const Searcher = struct {
             self.nnw.remove(self.b, move, undo);
             self.b.remove(move, undo);
 
+            // Root stuff
             if (root) {
                 var rm: *po.RootMove = &self.thread.root_moves.items[0];
                 var index: usize = 0;

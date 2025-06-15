@@ -51,7 +51,9 @@ pub const Maker = struct {
             !self.dat.combi.check(next))
         {
             // Moving one forward
-            if ((cap != .Noisy or next.rank() == prom_rank) and self.al.check(next)) {
+            if ((cap == .Either or (cap == .Noisy) == (next.rank() == prom_rank)) and
+                self.al.check(next))
+            {
                 if (next.rank() == prom_rank) try list.appendSlice(&[_]tp.Move{
                     .{ .from = sq, .to = next, .typ = .PromKnight },
                     .{ .from = sq, .to = next, .typ = .PromBishop },
@@ -146,9 +148,7 @@ pub const Maker = struct {
                 } else {
                     if (self.al.check(next)) {
                         if (next.rank() == prom_rank) {
-                            if (mv.typ == .PromKnight or mv.typ == .PromBishop or
-                                mv.typ == .PromRook or mv.typ == .PromQueen)
-                            {
+                            if (mv.typ.promotion()) {
                                 if (mv.to == next) return true;
                             }
                         } else if (mv.to == next and mv.typ == .Normal) return true;
@@ -183,9 +183,7 @@ pub const Maker = struct {
                 if (hit.lsb()) |to| {
                     if (p != .Diag or diag_pin == (to.diagonal() == sq.diagonal())) {
                         if (to.rank() == prom_rank) {
-                            if (mv.typ == .PromKnight or mv.typ == .PromBishop or
-                                mv.typ == .PromRook or mv.typ == .PromQueen)
-                            {
+                            if (mv.typ.promotion()) {
                                 if (mv.to == to) return true;
                             }
                         } else if (mv.to == to)

@@ -15,10 +15,9 @@ pub fn main() !void {
     try tt.init(128, std.heap.c_allocator);
     defer tt.deinit(std.heap.c_allocator);
 
-    // var nnw = try nn.NN.init("networks/", "v2_2.bin");
+    var nnw = try nn.NN.init("networks/", "v2_2.bin");
     var b = try bo.Board.fromFen(pos.start);
 
-    // try pl.play(&b, &nnw, .Black, 1000, false);
-    try pl.perft_print(&b, 6, std.heap.c_allocator);
+    try pl.play(&b, &nnw, .Black, 1000, false);
     // try pl.selfPlay(&b, &nnw, 600, true);
 }
