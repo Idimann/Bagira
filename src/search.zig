@@ -277,7 +277,7 @@ pub const Searcher = struct {
                 if (move_counter > 2) continue;
 
                 // Futility pruning
-                if (!self.stack[ply].in_check and !self.b.isQuiet(move)) {
+                if (!self.stack[ply].in_check and self.b.isCapture(move)) {
                     if (futility +
                         ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
                         continue;
@@ -289,7 +289,7 @@ pub const Searcher = struct {
 
             const undo = self.b.apply(move);
             tt.prefetch(self.b, false);
-            self.nnw.move(self.b, move, undo);
+            self.nnw.apply(self.b, move, undo);
 
             const score = -try self.quietSearch(-beta, -alpha);
 
@@ -382,7 +382,7 @@ pub const Searcher = struct {
         const tte_move = tte_fine and tte.reader.?.val.typ != .Upper;
         var tte_score = if (tte_fine) tte.reader.?.val.score else 0;
         const hash_move: ?tp.Move = if (root)
-            self.thread.best_root.pv[0]
+            self.thread.best_root.move
         else if (tte_move)
             tte.reader.?.val.move
         else
@@ -451,15 +451,13 @@ pub const Searcher = struct {
                     return try self.quietSearch(alpha, beta);
             }
 
-            const R: i12 = 4 + @divFloor(depth, 4);
-            const null_depth = if (R >= depth) 0 else depth - R;
-
             // Null move pruning
             if (eval >= beta and
                 static >= beta - ev.CentiPawn * depth + 2 * ev.PawnBase and
                 cutnode and
                 !self.stalemateDanger())
             {
+                const null_depth = @max(depth - 4 + @divFloor(depth, 4), 0);
                 self.stack[ply].stage = null;
                 self.stack[ply].hist_score = null;
                 self.stack[ply].move = null;
@@ -476,7 +474,7 @@ pub const Searcher = struct {
             const improve_int: i32 = @intCast(@intFromBool(improving));
             const probcut_add = ev.CentiPawn * (8 - 2 * improve_int);
             const probcut_beta = beta + probcut_add;
-            if (depth >= 3 and (!tte_fine or eval >= probcut_beta)) {
+            if (depth >= 4 and (!tte_fine or eval >= probcut_beta)) {
                 var pick = pi.Picker.init(
                     .ProbCutTT,
                     self,
@@ -496,7 +494,7 @@ pub const Searcher = struct {
 
                     const undo = self.b.apply(move);
                     tt.prefetch(self.b, false);
-                    self.nnw.move(self.b, move, undo);
+                    self.nnw.apply(self.b, move, undo);
 
                     var score = -try self.quietSearch(-probcut_beta, -probcut_beta + 1);
 
@@ -504,7 +502,7 @@ pub const Searcher = struct {
                         score = -try self.search(
                             -probcut_beta,
                             -probcut_beta + 1,
-                            null_depth,
+                            depth - 4,
                             !cutnode,
                         );
 
@@ -541,8 +539,7 @@ pub const Searcher = struct {
         const quiet_max = @divFloor(3 + depth_sq, 2 - @as(u2, @intFromBool(improving)));
 
         // Constants for LMR
-        const tt_capture = tte_move and (!self.b.isQuiet(hash_move.?) or
-            hash_move.?.typ.promotion());
+        const tt_capture = tte_move and self.b.isNoisy(hash_move.?);
 
         var best_move: ?tp.Move = null;
         var best_score: i32 = -MateVal;
@@ -572,9 +569,9 @@ pub const Searcher = struct {
             var next_depth = depth - 1;
             var score: i32 = undefined;
 
-            const quiet = self.b.isQuiet(move);
+            const quiet = !self.b.isCapture(move);
             var r_depth = next_depth;
-            if (!isLoss(best_score)) {
+            if (!root and !isLoss(best_score)) {
                 var R: i12 = 0;
                 const depth_index: u5 = @intCast(@min(31, depth));
                 const move_index: u6 = @intCast(@min(63, move_counter));
@@ -597,8 +594,9 @@ pub const Searcher = struct {
                     .TT => 2,
                     .GoodCaptures => 1,
                     .Killer => 1,
+                    .GoodQuiets => 0,
                     .BadCaptures => 0,
-                    .Quiets => 0,
+                    .BadQuiets => -1,
                     else => unreachable,
                 };
                 R = @min(@max(next_depth - 1, 0), @max(R, 1));
@@ -612,7 +610,7 @@ pub const Searcher = struct {
                     pick.skip_quiets = true;
 
                 // Futility pruning
-                if (!self.b.isQuiet(move)) {
+                if (self.b.isCapture(move)) {
                     if (r_depth < 7 and !self.stack[ply].in_check) {
                         const futil_val = futility + 8 * ev.CentiPawn * r_depth +
                             ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))];
@@ -682,7 +680,7 @@ pub const Searcher = struct {
 
             const undo = self.b.apply(move);
             tt.prefetch(self.b, false);
-            self.nnw.move(self.b, move, undo);
+            self.nnw.apply(self.b, move, undo);
 
             // LMR
             if (next_depth > 1 and
@@ -706,11 +704,9 @@ pub const Searcher = struct {
             // Root stuff
             if (root) {
                 var rm: *po.RootMove = &self.thread.root_moves.items[0];
-                var index: usize = 0;
                 for (0..self.thread.root_moves.items.len) |i| {
                     if (self.thread.root_moves.items[i].move.equals(move)) {
                         rm = &self.thread.root_moves.items[i];
-                        index = i;
                         break;
                     }
                 }
@@ -777,7 +773,7 @@ pub const Searcher = struct {
         const prev = if (ply >= 2) self.stack[ply - 2].move else null;
         const move = if (ply >= 1) self.stack[ply - 1].move else null;
         if (!self.stack[ply].in_check and
-            (best_move == null or self.b.isQuiet(best_move.?)) and
+            (best_move == null or !self.b.isCapture(best_move.?)) and
             !(best_score >= beta and best_score <= static) and
             !(best_move == null and best_score >= static))
         {

@@ -12,29 +12,38 @@ pub const SeeValue = [_]i32{
     ev.QueenBase,
     0,
 };
+
+pub var Time: i64 = 0;
 pub inline fn see(
     b: *const bo.Board,
     move: tp.Move,
     gen: *const mv.Maker,
     threshold: i32,
 ) bool {
-    if (b.isQuiet(move) or move.typ == .EnPassant or move.typ.promotion()) return true;
+    const start = std.time.microTimestamp();
+    defer Time += std.time.microTimestamp() - start;
 
-    var val = SeeValue[@intFromEnum(b.pieceType(move.to))] - threshold;
+    if (move.typ != .Normal) return true;
+
+    var val = (if (b.isCapture(move)) SeeValue[@intFromEnum(b.pieceType(move.to))] else 0) -
+        threshold;
     if (val < 0) return false;
 
     val = SeeValue[@intFromEnum(b.pieceType(move.from))] - val;
     if (val <= 0) return true;
 
     var attacks = gen.attackers(move.to);
-    var all = b.w_pieces.op_or(b.b_pieces);
+    var all = b.w_pieces.op_or(b.b_pieces).without(move.from.toBoard());
     var side = b.side;
 
+    var result = true;
     while (true) {
+        side.other();
         attacks = attacks.op_and(all);
-
         const my = attacks.op_and(b.sidePieces(side));
         if (my.v == 0) break;
+
+        result = !result;
 
         var typ: u6 = 0;
         var current = std.mem.zeroes(tp.Square);
@@ -45,9 +54,8 @@ pub inline fn see(
             }
         }
 
-        side.other();
         val = SeeValue[typ] - val;
-        if (val >= 0) {
+        if (val < @intFromBool(result)) {
             if (typ == @intFromEnum(tp.PieceType.King) and
                 attacks.op_and(b.sidePieces(side)).v != 0) side.other();
             break;
@@ -64,5 +72,5 @@ pub inline fn see(
             attacks = attacks.op_or(gen.attackersLine(move.to, all));
     }
 
-    return side != b.side;
+    return result;
 }

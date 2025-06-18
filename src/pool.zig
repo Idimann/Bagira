@@ -43,14 +43,14 @@ pub const Thread = struct {
     }
 
     pub inline fn sortRootMoves(self: *Thread) void {
-        if (self.root_moves.items.len < 2) return;
-
-        for (0..(self.root_moves.items.len - 1)) |i| {
-            for (0..(self.root_moves.items.len - i - 1)) |j| {
-                if (self.root_moves.items[j].score < self.root_moves.items[j + 1].score) {
-                    const temp = self.root_moves.items[j];
-                    self.root_moves.items[j] = self.root_moves.items[j + 1];
-                    self.root_moves.items[j + 1] = temp;
+        if (self.root_moves.items.len > 1) {
+            for (0..(self.root_moves.items.len - 1)) |i| {
+                for (0..(self.root_moves.items.len - i - 1)) |j| {
+                    if (self.root_moves.items[j].score < self.root_moves.items[j + 1].score) {
+                        const temp = self.root_moves.items[j];
+                        self.root_moves.items[j] = self.root_moves.items[j + 1];
+                        self.root_moves.items[j + 1] = temp;
+                    }
                 }
             }
         }
@@ -59,7 +59,7 @@ pub const Thread = struct {
     }
 };
 
-const PoolSize = 1;
+const PoolSize = 10;
 var Pool: [PoolSize]Thread = undefined;
 fn initPool(b: *const bo.Board, nnw: *nn.NN) !bool {
     const float_size: f32 = @floatFromInt(PoolSize);
@@ -170,16 +170,18 @@ pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !?RootMove {
         if (new_val > best_val or (new_val == best_val and better)) best = &Pool[i];
     }
 
-    // best.board = b.*;
-    // const gen = mv.Maker.init(&best.board);
-    // var pick = pi.Picker.init(.TT, &best.search, &gen, null, gen.attackedPawn(), null);
-    // while (try pick.nextMove()) |move| {
-    //     move.print();
-    //     std.debug.print(" {any} {any}\n", .{ pick.ret_stage, pick.current_val });
-    // }
-    // pick.deinit();
+    inline for (0..PoolSize) |i| {
+        Pool[i].best_root.move.print();
+        std.debug.print(" {} {} {} {} {} {}\n", .{
+            Pool[i].best_root.score,
+            Pool[i].best_root.depth,
+            Pool[i].best_root.avg_score,
+            Pool[i].best_root.avg_score_sq,
+            votes.get(Pool[i].best_root.move).?,
+            Pool[i].val(worst_score),
+        });
+    }
 
-    const ret = best.best_root;
     deinitPool();
-    return ret;
+    return best.best_root;
 }

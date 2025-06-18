@@ -214,7 +214,7 @@ pub const Stats = struct {
         prev: ?tp.Move,
         move: tp.Move,
     ) i32 {
-        const quiet = b.isQuiet(move);
+        const quiet = !b.isCapture(move);
         var ret = self.butterflyIn(b, move).*;
 
         if (!quiet) {
@@ -240,7 +240,7 @@ pub const Stats = struct {
         const big_depth: i32 = @intCast(depth);
         const bonus = std.math.clamp(big_depth * (big_depth + 48) - 30, 0, 428);
 
-        const quiet = b.isQuiet(main);
+        const quiet = !b.isCapture(main);
         const butterfly = self.butterflyIn(b, main);
 
         butterfly.* += gravity(ButterflyMax, bonus, butterfly.*);
@@ -264,7 +264,7 @@ pub const Stats = struct {
             const m = list.items[i];
             if (m.equals(main)) continue;
 
-            const this_quiet = b.isQuiet(m);
+            const this_quiet = !b.isCapture(m);
             if (!quiet and this_quiet) continue;
             var malus = bonus;
             if (quiet == this_quiet) malus = @divFloor(malus, 2);

@@ -420,14 +420,17 @@ pub const Maker = struct {
             .op_and(kings));
 
         const knights = ta.KnightAttacks[@intFromEnum(sq)]
+            .op_and(self.dat.combi)
             .without(self.b.pawns)
             .without(self.b.lines)
             .without(self.b.diags)
             .without(kings);
         ret = ret.op_or(knights);
 
-        const pawns = ta.PawnAttacksWhite[@intFromEnum(sq)]
-            .op_or(ta.PawnAttacksBlack[@intFromEnum(sq)])
+        const pawns = (ta.PawnAttacksWhite[@intFromEnum(sq)]
+            .op_and(self.b.w_pieces)
+            .op_or(ta.PawnAttacksBlack[@intFromEnum(sq)]
+            .op_and(self.b.b_pieces)))
             .op_and(self.b.pawns);
         ret = ret.op_or(pawns);
 

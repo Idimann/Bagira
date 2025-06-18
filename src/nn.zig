@@ -142,7 +142,7 @@ pub const NN = struct {
     }
 
     // This should be called after the move has already been made
-    pub inline fn move(self: *NN, b: *const bo.Board, m: tp.Move, undo: tp.Remove) void {
+    pub inline fn apply(self: *NN, b: *const bo.Board, m: tp.Move, undo: tp.Remove) void {
         switch (m.typ) {
             .Normal => {
                 const typ = b.pieceType(m.to);
@@ -150,47 +150,40 @@ pub const NN = struct {
                 if (undo.typ) |t| self.accumSub(m.to, t, b.side);
             },
             .EnPassant => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSub(m.from, m.to, typ, b.side.getOther());
+                self.accumAddSub(m.from, m.to, .Pawn, b.side.getOther());
                 if (b.side == .White)
                     self.accumSub(m.to.getApply(.North), .Pawn, b.side)
                 else
                     self.accumSub(m.to.getApply(.South), .Pawn, b.side);
             },
             .CastleKingside => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSub(m.from, m.to, typ, b.side.getOther());
+                self.accumAddSub(m.from, m.to, .King, b.side.getOther());
                 if (b.side == .White)
                     self.accumAddSub(.h8, .f8, .Rook, .Black)
                 else
                     self.accumAddSub(.h1, .f1, .Rook, .White);
             },
             .CastleQueenside => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSub(m.from, m.to, typ, b.side.getOther());
+                self.accumAddSub(m.from, m.to, .King, b.side.getOther());
                 if (b.side == .White)
                     self.accumAddSub(.a8, .d8, .Rook, .Black)
                 else
                     self.accumAddSub(.a1, .d1, .Rook, .White);
             },
             .PromKnight => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSubProm(m.from, m.to, typ, .Knight, b.side.getOther());
+                self.accumAddSubProm(m.from, m.to, .Pawn, .Knight, b.side.getOther());
                 if (undo.typ) |t| self.accumSub(m.to, t, b.side);
             },
             .PromBishop => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSubProm(m.from, m.to, typ, .Bishop, b.side.getOther());
+                self.accumAddSubProm(m.from, m.to, .Pawn, .Bishop, b.side.getOther());
                 if (undo.typ) |t| self.accumSub(m.to, t, b.side);
             },
             .PromRook => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSubProm(m.from, m.to, typ, .Rook, b.side.getOther());
+                self.accumAddSubProm(m.from, m.to, .Pawn, .Rook, b.side.getOther());
                 if (undo.typ) |t| self.accumSub(m.to, t, b.side);
             },
             .PromQueen => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSubProm(m.from, m.to, typ, .Queen, b.side.getOther());
+                self.accumAddSubProm(m.from, m.to, .Pawn, .Queen, b.side.getOther());
                 if (undo.typ) |t| self.accumSub(m.to, t, b.side);
             },
         }
@@ -205,47 +198,40 @@ pub const NN = struct {
                 if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
             },
             .EnPassant => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSub(m.to, m.from, typ, b.side.getOther());
+                self.accumAddSub(m.to, m.from, .Pawn, b.side.getOther());
                 if (b.side == .White)
                     self.accumAdd(m.to.getApply(.North), .Pawn, b.side)
                 else
                     self.accumAdd(m.to.getApply(.South), .Pawn, b.side);
             },
             .CastleKingside => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSub(m.to, m.from, typ, b.side.getOther());
+                self.accumAddSub(m.to, m.from, .King, b.side.getOther());
                 if (b.side == .White)
                     self.accumAddSub(.f8, .h8, .Rook, .Black)
                 else
                     self.accumAddSub(.f1, .h1, .Rook, .White);
             },
             .CastleQueenside => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSub(m.to, m.from, typ, b.side.getOther());
+                self.accumAddSub(m.to, m.from, .King, b.side.getOther());
                 if (b.side == .White)
                     self.accumAddSub(.d8, .a8, .Rook, .Black)
                 else
                     self.accumAddSub(.d1, .a1, .Rook, .White);
             },
             .PromKnight => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSubProm(m.to, m.from, .Knight, typ, b.side.getOther());
+                self.accumAddSubProm(m.to, m.from, .Knight, .Pawn, b.side.getOther());
                 if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
             },
             .PromBishop => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSubProm(m.to, m.from, .Bishop, typ, b.side.getOther());
+                self.accumAddSubProm(m.to, m.from, .Bishop, .Pawn, b.side.getOther());
                 if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
             },
             .PromRook => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSubProm(m.to, m.from, .Rook, typ, b.side.getOther());
+                self.accumAddSubProm(m.to, m.from, .Rook, .Pawn, b.side.getOther());
                 if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
             },
             .PromQueen => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSubProm(m.to, m.from, .Queen, typ, b.side.getOther());
+                self.accumAddSubProm(m.to, m.from, .Queen, .Pawn, b.side.getOther());
                 if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
             },
         }

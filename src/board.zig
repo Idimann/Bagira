@@ -85,8 +85,12 @@ pub const Board = struct {
         return .{ .white = col, .typ = .Knight };
     }
 
-    pub inline fn isQuiet(self: *const Board, m: tp.Move) bool {
-        return !self.w_pieces.op_or(self.b_pieces).check(m.to);
+    pub inline fn isCapture(self: *const Board, m: tp.Move) bool {
+        return self.w_pieces.op_or(self.b_pieces).check(m.to);
+    }
+
+    pub inline fn isNoisy(self: *const Board, m: tp.Move) bool {
+        return self.isCapture(m) or m.typ == .EnPassant or m.typ.promotion();
     }
 
     pub inline fn sidePieces(self: *const Board, side: Side) tp.BitBoard {
