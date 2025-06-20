@@ -1,7 +1,6 @@
 const std = @import("std");
 const tp = @import("types.zig");
 const mv = @import("movegen.zig");
-const pi = @import("movepick.zig");
 const bo = @import("board.zig");
 const se = @import("search.zig");
 const nn = @import("nn.zig");
@@ -59,7 +58,7 @@ pub const Thread = struct {
     }
 };
 
-const PoolSize = 10;
+const PoolSize = 1;
 var Pool: [PoolSize]Thread = undefined;
 fn initPool(b: *const bo.Board, nnw: *nn.NN) !bool {
     const float_size: f32 = @floatFromInt(PoolSize);
@@ -170,17 +169,27 @@ pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !?RootMove {
         if (new_val > best_val or (new_val == best_val and better)) best = &Pool[i];
     }
 
-    inline for (0..PoolSize) |i| {
-        Pool[i].best_root.move.print();
-        std.debug.print(" {} {} {} {} {} {}\n", .{
-            Pool[i].best_root.score,
-            Pool[i].best_root.depth,
-            Pool[i].best_root.avg_score,
-            Pool[i].best_root.avg_score_sq,
-            votes.get(Pool[i].best_root.move).?,
-            Pool[i].val(worst_score),
-        });
+    const pi = @import("movepick.zig");
+    best.board = b.*;
+    const gen = mv.Maker.init(b);
+    var pick = pi.Picker.init(.TT, &best.search, &gen, null, gen.attackedPawn(), null);
+    defer pick.deinit();
+    while (try pick.nextMove()) |move| {
+        move.print();
+        std.debug.print(" {} {any}\n", .{pick.ret_stage, pick.current_val});
     }
+
+    // inline for (0..PoolSize) |i| {
+    //     Pool[i].best_root.move.print();
+    //     std.debug.print(" {} {} {} {} {} {}\n", .{
+    //         Pool[i].best_root.score,
+    //         Pool[i].best_root.depth,
+    //         Pool[i].best_root.avg_score,
+    //         Pool[i].best_root.avg_score_sq,
+    //         votes.get(Pool[i].best_root.move).?,
+    //         Pool[i].val(worst_score),
+    //     });
+    // }
 
     deinitPool();
     return best.best_root;

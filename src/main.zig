@@ -17,8 +17,7 @@ pub fn main() !void {
 
     var nnw = try nn.NN.init("networks/", "v2_2.bin");
     var b = try bo.Board.fromFen(pos.start);
-    _ = b.apply(.{ .from = .c2, .to = .c4, .typ = .Normal });
 
-    try pl.play(&b, &nnw, .White, 1000, false);
+    try pl.play(&b, &nnw, .Black, 1000, false);
     // try pl.selfPlay(&b, &nnw, 600, true);
 }

@@ -10,11 +10,12 @@ const pi = @import("movepick.zig");
 const hi = @import("history.zig");
 const see = @import("see.zig");
 
-fn initReductions() [2][32][64]i12 {
-    @setEvalBranchQuota(2048);
-    var ret = std.mem.zeroes([2][32][64]i12);
+pub const MaxDepth = 255;
+fn initLmr() [2][MaxDepth][64]i12 {
+    @setEvalBranchQuota(MaxDepth * 64);
+    var ret = std.mem.zeroes([2][MaxDepth][64]i12);
 
-    for (1..32) |i| {
+    for (1..MaxDepth) |i| {
         for (1..64) |j| {
             const log = @log(@as(f64, @floatFromInt(i))) * @log(@as(f64, @floatFromInt(j)));
 
@@ -26,23 +27,36 @@ fn initReductions() [2][32][64]i12 {
     return ret;
 }
 
-fn initPrunes() [2][32]i32 {
-    var ret = std.mem.zeroes([2][32]i32);
+fn initSeeCuts() [2][MaxDepth]i32 {
+    var ret = std.mem.zeroes([2][MaxDepth]i32);
 
-    for (1..32) |i| {
+    for (1..MaxDepth) |i| {
         const depth: comptime_float = @floatFromInt(i);
 
-        ret[0][i] = @intFromFloat(-13.78 * depth * depth);
-        ret[1][i] = @intFromFloat(-108.35 * depth);
+        ret[0][i] = @intFromFloat(4 * -108.35 * depth);
+        ret[1][i] = @intFromFloat(4 * -13.78 * depth * depth);
     }
 
     return ret;
 }
 
-const Reductions = initReductions();
-const Prunes = initPrunes();
+fn initLmp() [2][MaxDepth]i32 {
+    var ret = std.mem.zeroes([2][MaxDepth]i32);
 
-pub const MaxDepth = 255;
+    for (1..MaxDepth) |i| {
+        const depth: comptime_float = @floatFromInt(i);
+
+        ret[0][i] = @intFromFloat(1.43 + 0.33 * depth * depth);
+        ret[1][i] = @intFromFloat(1.77 + 0.98 * depth * depth);
+    }
+
+    return ret;
+}
+
+const LMR = initLmr();
+const SEE_CUTS = initSeeCuts();
+const LMP = initLmp();
+
 const History = struct {
     static: i32,
     stage: ?pi.Stage,
@@ -457,7 +471,7 @@ pub const Searcher = struct {
                 cutnode and
                 !self.stalemateDanger())
             {
-                const null_depth = @max(depth - 4 + @divFloor(depth, 4), 0);
+                const null_depth = @max(depth - 4 - @divFloor(depth, 4), 0);
                 self.stack[ply].stage = null;
                 self.stack[ply].hist_score = null;
                 self.stack[ply].move = null;
@@ -474,7 +488,7 @@ pub const Searcher = struct {
             const improve_int: i32 = @intCast(@intFromBool(improving));
             const probcut_add = ev.CentiPawn * (8 - 2 * improve_int);
             const probcut_beta = beta + probcut_add;
-            if (depth >= 4 and (!tte_fine or eval >= probcut_beta)) {
+            if (depth >= 3 and (!tte_fine or eval >= probcut_beta)) {
                 var pick = pi.Picker.init(
                     .ProbCutTT,
                     self,
@@ -498,7 +512,7 @@ pub const Searcher = struct {
 
                     var score = -try self.quietSearch(-probcut_beta, -probcut_beta + 1);
 
-                    if (score >= probcut_beta)
+                    if (score >= probcut_beta and depth > 4)
                         score = -try self.search(
                             -probcut_beta,
                             -probcut_beta + 1,
@@ -534,9 +548,7 @@ pub const Searcher = struct {
         defer pick.deinit();
 
         // Constants for pruning
-        const depth_sq = @as(i32, @intCast(depth)) * @as(i32, @intCast(depth));
         const futility = eval + ev.CentiPawn * 11;
-        const quiet_max = @divFloor(3 + depth_sq, 2 - @as(u2, @intFromBool(improving)));
 
         // Constants for LMR
         const tt_capture = tte_move and self.b.isNoisy(hash_move.?);
@@ -569,13 +581,13 @@ pub const Searcher = struct {
             var next_depth = depth - 1;
             var score: i32 = undefined;
 
-            const quiet = !self.b.isCapture(move);
+            const quiet = !self.b.isNoisy(move);
             var r_depth = next_depth;
             if (!root and !isLoss(best_score)) {
                 var R: i12 = 0;
-                const depth_index: u5 = @intCast(@min(31, depth));
+                const depth_index: u8 = @intCast(@min(MaxDepth - 1, depth));
                 const move_index: u6 = @intCast(@min(63, move_counter));
-                R += Reductions[@intFromBool(quiet)][depth_index][move_index];
+                R += LMR[@intFromBool(quiet)][depth_index][move_index];
                 if (pick.current_val) |h|
                     R -= @intCast(std.math.clamp(@divFloor(h, 4 * hi.CentiHist), -3, 2));
 
@@ -606,7 +618,8 @@ pub const Searcher = struct {
             // Pruning
             if (!root and !isLoss(best_score) and !self.stalemateDanger()) {
                 // Move count pruning
-                if (move_counter >= quiet_max)
+                const depth_index: u8 = @intCast(@min(MaxDepth - 1, depth));
+                if (move_counter >= LMP[@intFromBool(improving)][depth_index])
                     pick.skip_quiets = true;
 
                 // Futility pruning
@@ -630,14 +643,11 @@ pub const Searcher = struct {
                 }
 
                 // SEE pruning
-                const followup = ply >= 1 and
-                    self.stack[ply - 1].move != null and
-                    self.stack[ply - 1].move.?.to == move.to;
-                if (!followup and !see.see(
+                if (!see.see(
                     self.b,
                     move,
                     &gen,
-                    Prunes[@intFromBool(!quiet)][@intCast(r_depth)],
+                    SEE_CUTS[@intFromBool(quiet)][@intCast(r_depth)],
                 )) continue;
             }
 

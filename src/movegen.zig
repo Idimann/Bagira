@@ -428,9 +428,9 @@ pub const Maker = struct {
         ret = ret.op_or(knights);
 
         const pawns = (ta.PawnAttacksWhite[@intFromEnum(sq)]
-            .op_and(self.b.w_pieces)
+            .op_and(self.b.b_pieces)
             .op_or(ta.PawnAttacksBlack[@intFromEnum(sq)]
-            .op_and(self.b.b_pieces)))
+            .op_and(self.b.w_pieces)))
             .op_and(self.b.pawns);
         ret = ret.op_or(pawns);
 

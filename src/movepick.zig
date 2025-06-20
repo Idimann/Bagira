@@ -123,7 +123,7 @@ pub const Picker = struct {
 
     inline fn pickMove(
         self: *Picker,
-        comptime filter: fn (*const Picker, tp.Move, i32) bool,
+        comptime filter: *const fn (*const Picker, tp.Move, i32) bool,
     ) ?usize {
         if (self.list.items.len == self.start) return null;
 
@@ -150,6 +150,7 @@ pub const Picker = struct {
                 );
                 if (best == self.start) best = i;
                 self.start += 1;
+                best = @max(best, self.start);
             } else if (self.score_list.items[i] > self.score_list.items[best]) best = i;
         }
 

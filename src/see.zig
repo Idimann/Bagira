@@ -13,16 +13,12 @@ pub const SeeValue = [_]i32{
     0,
 };
 
-pub var Time: i64 = 0;
 pub inline fn see(
     b: *const bo.Board,
     move: tp.Move,
     gen: *const mv.Maker,
     threshold: i32,
 ) bool {
-    const start = std.time.microTimestamp();
-    defer Time += std.time.microTimestamp() - start;
-
     if (move.typ != .Normal) return true;
 
     var val = (if (b.isCapture(move)) SeeValue[@intFromEnum(b.pieceType(move.to))] else 0) -
@@ -57,7 +53,8 @@ pub inline fn see(
         val = SeeValue[typ] - val;
         if (val < @intFromBool(result)) {
             if (typ == @intFromEnum(tp.PieceType.King) and
-                attacks.op_and(b.sidePieces(side)).v != 0) side.other();
+                attacks.op_and(b.sidePieces(side.getOther())).v != 0)
+                result = !result;
             break;
         }
 
