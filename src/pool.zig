@@ -169,16 +169,6 @@ pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !?RootMove {
         if (new_val > best_val or (new_val == best_val and better)) best = &Pool[i];
     }
 
-    const pi = @import("movepick.zig");
-    best.board = b.*;
-    const gen = mv.Maker.init(b);
-    var pick = pi.Picker.init(.TT, &best.search, &gen, null, gen.attackedPawn(), null);
-    defer pick.deinit();
-    while (try pick.nextMove()) |move| {
-        move.print();
-        std.debug.print(" {} {any}\n", .{pick.ret_stage, pick.current_val});
-    }
-
     // inline for (0..PoolSize) |i| {
     //     Pool[i].best_root.move.print();
     //     std.debug.print(" {} {} {} {} {} {}\n", .{

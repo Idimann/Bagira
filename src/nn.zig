@@ -18,15 +18,20 @@ const Net = extern struct {
     out_weights: [Buckets][2 * AccumSize]i16,
     out_bias: [Buckets]i16,
 };
+const Info = struct {
+    move: tp.Move,
+    moving: tp.PieceType,
+    cap: ?tp.PieceType,
+    side: bo.Side,
+};
 pub const NN = struct {
     accum_w: [AccumSize]i16,
     accum_b: [AccumSize]i16,
+    infos: [2048]Info,
+    pos: u12,
+    lazy_pos: u12,
 
     network: Net,
-
-    pub fn initEmpty() NN {
-        return std.mem.zeroes(NN);
-    }
 
     pub fn init(comptime folder: anytype, comptime net: anytype) !NN {
         const file = try std.fs.cwd().openFile(folder ++ net, .{ .mode = .read_only });
@@ -38,6 +43,9 @@ pub const NN = struct {
         return .{
             .accum_w = std.mem.zeroes([AccumSize]i16),
             .accum_b = std.mem.zeroes([AccumSize]i16),
+            .infos = std.mem.zeroes([2048]Info),
+            .pos = 0,
+            .lazy_pos = 0,
             .network = try reader.readStructEndian(Net, .little),
         };
     }
@@ -65,7 +73,12 @@ pub const NN = struct {
         return side_in * 6 * 64 + piece_in * 64 + sq_in;
     }
 
-    inline fn accumAdd(self: *NN, sq: tp.Square, typ: tp.PieceType, side: bo.Side) void {
+    inline fn accumAdd(
+        self: *NN,
+        sq: tp.Square,
+        typ: tp.PieceType,
+        side: bo.Side,
+    ) void {
         const index_w = calcIndex(.White, sq, typ, side);
         const index_b = calcIndex(.Black, sq, typ, side);
 
@@ -75,7 +88,12 @@ pub const NN = struct {
         }
     }
 
-    inline fn accumSub(self: *NN, sq: tp.Square, typ: tp.PieceType, side: bo.Side) void {
+    inline fn accumSub(
+        self: *NN,
+        sq: tp.Square,
+        typ: tp.PieceType,
+        side: bo.Side,
+    ) void {
         const index_w = calcIndex(.White, sq, typ, side);
         const index_b = calcIndex(.Black, sq, typ, side);
 
@@ -127,11 +145,15 @@ pub const NN = struct {
     }
 
     pub inline fn inputAccum(self: *NN, b: *const bo.Board) void {
+        self.pos = 0;
+        self.lazy_pos = 0;
+
         self.accum_w = std.mem.zeroes([AccumSize]i16);
         self.accum_b = std.mem.zeroes([AccumSize]i16);
 
         var iter = b.w_pieces;
         while (iter.popLsb()) |sq| self.accumAdd(sq, b.pieceType(sq), .White);
+
         iter = b.b_pieces;
         while (iter.popLsb()) |sq| self.accumAdd(sq, b.pieceType(sq), .Black);
 
@@ -141,100 +163,126 @@ pub const NN = struct {
         }
     }
 
-    // This should be called after the move has already been made
-    pub inline fn apply(self: *NN, b: *const bo.Board, m: tp.Move, undo: tp.Remove) void {
-        switch (m.typ) {
+    inline fn doApply(self: *NN, inf: Info) void {
+        switch (inf.move.typ) {
             .Normal => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSub(m.from, m.to, typ, b.side.getOther());
-                if (undo.typ) |t| self.accumSub(m.to, t, b.side);
+                self.accumAddSub(inf.move.from, inf.move.to, inf.moving, inf.side);
+                if (inf.cap) |t| self.accumSub(inf.move.to, t, inf.side.getOther());
             },
             .EnPassant => {
-                self.accumAddSub(m.from, m.to, .Pawn, b.side.getOther());
-                if (b.side == .White)
-                    self.accumSub(m.to.getApply(.North), .Pawn, b.side)
+                self.accumAddSub(inf.move.from, inf.move.to, .Pawn, inf.side);
+                if (inf.side == .Black)
+                    self.accumSub(inf.move.to.getApply(.North), .Pawn, inf.side.getOther())
                 else
-                    self.accumSub(m.to.getApply(.South), .Pawn, b.side);
+                    self.accumSub(inf.move.to.getApply(.South), .Pawn, inf.side.getOther());
             },
             .CastleKingside => {
-                self.accumAddSub(m.from, m.to, .King, b.side.getOther());
-                if (b.side == .White)
+                self.accumAddSub(inf.move.from, inf.move.to, .King, inf.side);
+                if (inf.side == .Black)
                     self.accumAddSub(.h8, .f8, .Rook, .Black)
                 else
                     self.accumAddSub(.h1, .f1, .Rook, .White);
             },
             .CastleQueenside => {
-                self.accumAddSub(m.from, m.to, .King, b.side.getOther());
-                if (b.side == .White)
+                self.accumAddSub(inf.move.from, inf.move.to, .King, inf.side);
+                if (inf.side == .Black)
                     self.accumAddSub(.a8, .d8, .Rook, .Black)
                 else
                     self.accumAddSub(.a1, .d1, .Rook, .White);
             },
             .PromKnight => {
-                self.accumAddSubProm(m.from, m.to, .Pawn, .Knight, b.side.getOther());
-                if (undo.typ) |t| self.accumSub(m.to, t, b.side);
+                self.accumAddSubProm(inf.move.from, inf.move.to, .Pawn, .Knight, inf.side);
+                if (inf.cap) |t| self.accumSub(inf.move.to, t, inf.side.getOther());
             },
             .PromBishop => {
-                self.accumAddSubProm(m.from, m.to, .Pawn, .Bishop, b.side.getOther());
-                if (undo.typ) |t| self.accumSub(m.to, t, b.side);
+                self.accumAddSubProm(inf.move.from, inf.move.to, .Pawn, .Bishop, inf.side);
+                if (inf.cap) |t| self.accumSub(inf.move.to, t, inf.side.getOther());
             },
             .PromRook => {
-                self.accumAddSubProm(m.from, m.to, .Pawn, .Rook, b.side.getOther());
-                if (undo.typ) |t| self.accumSub(m.to, t, b.side);
+                self.accumAddSubProm(inf.move.from, inf.move.to, .Pawn, .Rook, inf.side);
+                if (inf.cap) |t| self.accumSub(inf.move.to, t, inf.side.getOther());
             },
             .PromQueen => {
-                self.accumAddSubProm(m.from, m.to, .Pawn, .Queen, b.side.getOther());
-                if (undo.typ) |t| self.accumSub(m.to, t, b.side);
+                self.accumAddSubProm(inf.move.from, inf.move.to, .Pawn, .Queen, inf.side);
+                if (inf.cap) |t| self.accumSub(inf.move.to, t, inf.side.getOther());
             },
         }
     }
 
-    // This should be called before the move gets removed
-    pub inline fn remove(self: *NN, b: *const bo.Board, m: tp.Move, undo: tp.Remove) void {
-        switch (m.typ) {
+    inline fn doRemove(self: *NN, inf: Info) void {
+        switch (inf.move.typ) {
             .Normal => {
-                const typ = b.pieceType(m.to);
-                self.accumAddSub(m.to, m.from, typ, b.side.getOther());
-                if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
+                self.accumAddSub(inf.move.to, inf.move.from, inf.moving, inf.side);
+                if (inf.cap) |t| self.accumAdd(inf.move.to, t, inf.side.getOther());
             },
             .EnPassant => {
-                self.accumAddSub(m.to, m.from, .Pawn, b.side.getOther());
-                if (b.side == .White)
-                    self.accumAdd(m.to.getApply(.North), .Pawn, b.side)
+                self.accumAddSub(inf.move.to, inf.move.from, .Pawn, inf.side);
+                if (inf.side == .Black)
+                    self.accumAdd(inf.move.to.getApply(.North), .Pawn, inf.side.getOther())
                 else
-                    self.accumAdd(m.to.getApply(.South), .Pawn, b.side);
+                    self.accumAdd(inf.move.to.getApply(.South), .Pawn, inf.side.getOther());
             },
             .CastleKingside => {
-                self.accumAddSub(m.to, m.from, .King, b.side.getOther());
-                if (b.side == .White)
+                self.accumAddSub(inf.move.to, inf.move.from, .King, inf.side);
+                if (inf.side == .Black)
                     self.accumAddSub(.f8, .h8, .Rook, .Black)
                 else
                     self.accumAddSub(.f1, .h1, .Rook, .White);
             },
             .CastleQueenside => {
-                self.accumAddSub(m.to, m.from, .King, b.side.getOther());
-                if (b.side == .White)
+                self.accumAddSub(inf.move.to, inf.move.from, .King, inf.side);
+                if (inf.side == .Black)
                     self.accumAddSub(.d8, .a8, .Rook, .Black)
                 else
                     self.accumAddSub(.d1, .a1, .Rook, .White);
             },
             .PromKnight => {
-                self.accumAddSubProm(m.to, m.from, .Knight, .Pawn, b.side.getOther());
-                if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
+                self.accumAddSubProm(inf.move.to, inf.move.from, .Knight, .Pawn, inf.side);
+                if (inf.cap) |t| self.accumAdd(inf.move.to, t, inf.side.getOther());
             },
             .PromBishop => {
-                self.accumAddSubProm(m.to, m.from, .Bishop, .Pawn, b.side.getOther());
-                if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
+                self.accumAddSubProm(inf.move.to, inf.move.from, .Bishop, .Pawn, inf.side);
+                if (inf.cap) |t| self.accumAdd(inf.move.to, t, inf.side.getOther());
             },
             .PromRook => {
-                self.accumAddSubProm(m.to, m.from, .Rook, .Pawn, b.side.getOther());
-                if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
+                self.accumAddSubProm(inf.move.to, inf.move.from, .Rook, .Pawn, inf.side);
+                if (inf.cap) |t| self.accumAdd(inf.move.to, t, inf.side.getOther());
             },
             .PromQueen => {
-                self.accumAddSubProm(m.to, m.from, .Queen, .Pawn, b.side.getOther());
-                if (undo.typ) |t| self.accumAdd(m.to, t, b.side);
+                self.accumAddSubProm(inf.move.to, inf.move.from, .Queen, .Pawn, inf.side);
+                if (inf.cap) |t| self.accumAdd(inf.move.to, t, inf.side.getOther());
             },
         }
+    }
+
+    // This should be called after actually applying the move
+    pub inline fn apply(self: *NN, b: *const bo.Board, move: tp.Move, undo: tp.Remove) void {
+        if (self.lazy_pos < self.pos) self.doLazy();
+
+        self.infos[self.lazy_pos] = .{
+            .move = move,
+            .moving = switch (move.typ) {
+                .Normal => b.pieceType(move.to),
+                .EnPassant, .PromKnight, .PromBishop, .PromRook, .PromQueen => .Pawn,
+                .CastleKingside, .CastleQueenside => .King,
+            },
+            .cap = undo.typ,
+            .side = b.side.getOther(),
+        };
+        self.lazy_pos += 1;
+    }
+
+    pub inline fn remove(self: *NN) void {
+        self.lazy_pos -= 1;
+    }
+
+    inline fn doLazy(self: *NN) void {
+        if (self.pos < self.lazy_pos) {
+            for (self.pos..self.lazy_pos) |j| self.doApply(self.infos[j]);
+        } else if (self.lazy_pos < self.pos) {
+            for (self.lazy_pos..self.pos) |j| self.doRemove(self.infos[j]);
+        }
+        self.pos = self.lazy_pos;
     }
 
     inline fn chooseBucket(b: *const bo.Board) usize {
@@ -244,6 +292,8 @@ pub const NN = struct {
     }
 
     pub inline fn output(self: *NN, b: *const bo.Board) i32 {
+        self.doLazy();
+
         var ret: i32 = 0;
         const bucket = chooseBucket(b);
 

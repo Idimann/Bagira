@@ -170,7 +170,7 @@ pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool
             std.debug.print("\n", .{});
             if (se.Searcher.isMate(best.score)) {
                 const len = @divFloor(best.pv_size, 2) + 1;
-                std.debug.print(" => Mate in {}\n", .{len});
+                std.debug.print(" => Mate in {} found at {}\n", .{ len, best.depth });
             } else {
                 const score = @as(f32, @floatFromInt(best.score)) /
                     @as(f32, @floatFromInt(ev.PawnBase));
@@ -205,7 +205,7 @@ pub fn selfPlay(b: *bo.Board, nnw: *nn.NN, time: i64, minimal: bool) !void {
         std.debug.print("\n", .{});
         if (se.Searcher.isMate(best.score)) {
             const len = @divFloor(best.pv_size, 2) + 1;
-            std.debug.print(" => Mate in {}\n", .{len});
+            std.debug.print(" => Mate in {} found at {}\n", .{ len, best.depth });
         } else {
             const score = @as(f32, @floatFromInt(best.score)) /
                 @as(f32, @floatFromInt(ev.PawnBase));

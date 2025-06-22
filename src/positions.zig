@@ -4,6 +4,8 @@ pub const Mate = struct {
     pub const _1 = "7k/4Q3/6K1/8/8/8/8/8 w - - 0 1";
     pub const _2 = "7k/4Q3/4K3/8/8/8/8/8 w - - 0 1";
     pub const _4 = "7k/8/8/3K4/4Q3/8/8/8 w - - 0 1";
+    pub const _5 = "7k/4Q3/8/8/8/1K6/8/8 w - - 0 1";
+    pub const _6 = "7k/4Q3/8/8/8/8/K7/8 w - - 0 1";
 };
 
 pub const Openings = struct {

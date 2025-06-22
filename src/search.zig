@@ -307,7 +307,7 @@ pub const Searcher = struct {
 
             const score = -try self.quietSearch(-beta, -alpha);
 
-            self.nnw.remove(self.b, move, undo);
+            self.nnw.remove();
             self.b.remove(move, undo);
 
             if (score > best_score) {
@@ -520,7 +520,7 @@ pub const Searcher = struct {
                             !cutnode,
                         );
 
-                    self.nnw.remove(self.b, move, undo);
+                    self.nnw.remove();
                     self.b.remove(move, undo);
 
                     if (score >= probcut_beta) {
@@ -708,7 +708,7 @@ pub const Searcher = struct {
             if (pv and (move_counter == 1 or score > alpha))
                 score = -try self.search(-beta, -alpha, next_depth, false);
 
-            self.nnw.remove(self.b, move, undo);
+            self.nnw.remove();
             self.b.remove(move, undo);
 
             // Root stuff
@@ -818,21 +818,21 @@ pub const Searcher = struct {
         return best_score;
     }
 
-    pub fn aspiration(self: *Searcher, prev: i32, depth: i12) !i32 {
+    pub fn aspiration(self: *Searcher, depth: i12) !i32 {
         const avg_sq: i32 = @intCast(@abs(self.thread.best_root.avg_score_sq));
-        var delta = @divFloor(ev.CentiPawn, 8) + @divFloor(avg_sq, ev.CentiPawn * 16);
-        var alpha = prev - delta;
-        var beta = prev + delta;
+        var delta = @divFloor(ev.CentiPawn, 8) + @divFloor(avg_sq, ev.CentiPawn * 6);
+        var alpha = self.thread.best_root.avg_score - delta;
+        var beta = self.thread.best_root.avg_score + delta;
 
         while (true) {
             const score = try self.search(alpha, beta, depth, false);
 
             if (score <= alpha) {
-                beta = alpha + @divFloor(beta - alpha, 2) + 1;
-                alpha -= delta;
+                beta = @divFloor(alpha + beta, 2);
+                alpha = score - delta;
                 if (alpha < -MateVal) alpha = -MateVal;
             } else if (score >= beta) {
-                beta += delta;
+                beta = score + delta;
                 if (beta > MateVal) beta = MateVal;
             } else return score;
 
@@ -846,6 +846,7 @@ pub const Searcher = struct {
         var score: i32 = -MateVal;
         while (true) {
             const se_depth: i12 = @intFromFloat(depth + 0.5);
+
             // For the start, we just do a normal search
             if (score == -MateVal) {
                 score = self.search(-MateVal, MateVal, se_depth, false) catch |err| {
@@ -855,10 +856,7 @@ pub const Searcher = struct {
                     }
                 };
             } else {
-                score = self.aspiration(
-                    self.thread.best_root.avg_score,
-                    se_depth,
-                ) catch |err| {
+                score = self.aspiration(se_depth) catch |err| {
                     switch (err) {
                         error.NoTime => break,
                         else => return err,
@@ -869,7 +867,6 @@ pub const Searcher = struct {
             depth += self.thread.iter;
 
             self.clearStack();
-            if (isMate(score)) break;
         }
     }
 };
