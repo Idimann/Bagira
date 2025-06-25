@@ -169,6 +169,8 @@ pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !?RootMove {
         if (new_val > best_val or (new_val == best_val and better)) best = &Pool[i];
     }
 
+    std.debug.print("Total nodes: {}\n", .{best.nodes});
+
     // inline for (0..PoolSize) |i| {
     //     Pool[i].best_root.move.print();
     //     std.debug.print(" {} {} {} {} {} {}\n", .{

@@ -39,11 +39,19 @@ pub const Stage = enum {
     QuietSearch,
 };
 
+const Score = packed struct {
+    hist: i32,
+    add: i32,
+
+    pub inline fn val(self: Score) i32 {
+        return self.hist + self.add;
+    }
+};
 pub const Picker = struct {
     search: *const se.Searcher,
     gen: *const mv.Maker,
     list: std.ArrayList(tp.Move),
-    score_list: std.ArrayList(i32),
+    score_list: std.ArrayList(Score),
     start: usize,
     pawn_attacked: tp.BitBoard,
 
@@ -54,7 +62,7 @@ pub const Picker = struct {
     killer: ?tp.Move,
     searched_killer: bool,
     skip_quiets: bool,
-    current_val: ?i32,
+    current_val: ?Score,
     threshold: ?i32,
 
     pub fn init(
@@ -141,17 +149,18 @@ pub const Picker = struct {
                 if (i >= self.list.items.len) break;
             }
 
-            if (!filter(self, self.list.items[i], self.score_list.items[i])) {
+            if (!filter(self, self.list.items[i], self.score_list.items[i].val())) {
                 std.mem.swap(tp.Move, &self.list.items[i], &self.list.items[self.start]);
                 std.mem.swap(
-                    i32,
+                    Score,
                     &self.score_list.items[i],
                     &self.score_list.items[self.start],
                 );
                 if (best == self.start) best = i;
                 self.start += 1;
                 best = @max(best, self.start);
-            } else if (self.score_list.items[i] > self.score_list.items[best]) best = i;
+            } else if (self.score_list.items[i].val() > self.score_list.items[best].val())
+                best = i;
         }
 
         return if (self.list.items.len == self.start) null else best;
@@ -168,38 +177,38 @@ pub const Picker = struct {
         try self.score_list.ensureTotalCapacity(self.list.items.len);
         for (start..self.list.items.len) |i| {
             const move = self.list.items[i];
-            var score: i32 = 0;
+            var add: i32 = 0;
 
             if (self.gen.dat.our_king != move.from) {
                 // Penalty for moving to a square attacked by a pawn
                 if (self.pawn_attacked.check(move.to)) {
-                    score -= ev.PieceValue[@intFromEnum(self.search.b.pieceType(move.from))];
-                    score += @divExact(ev.PawnBase, 2);
+                    add -= ev.PieceValue[@intFromEnum(self.search.b.pieceType(move.from))];
+                    add += @divExact(ev.PawnBase, 2);
                 }
 
                 // Bonus for evading a pawn attack
                 if (self.pawn_attacked.check(move.from) and
                     !self.pawn_attacked.check(move.to))
                 {
-                    score += ev.PieceValue[@intFromEnum(self.search.b.pieceType(move.from))];
-                    score -= @divExact(ev.PawnBase, 2);
+                    add += ev.PieceValue[@intFromEnum(self.search.b.pieceType(move.from))];
+                    add -= @divExact(ev.PawnBase, 2);
                 }
 
                 if (self.search.b.isCapture(move))
-                    score += ev.PieceValue[@intFromEnum(self.search.b.pieceType(move.to))];
-            } else score -= ev.CentiPawn * 5;
+                    add += ev.PieceValue[@intFromEnum(self.search.b.pieceType(move.to))];
+            } else add -= ev.CentiPawn * 5;
 
             // We convert the previous boni/mali to history vals
-            score *= hi.CentiHist;
+            add *= hi.CentiHist;
 
             // History boni
-            score += self.search.stats.get(
+            const hist =  self.search.stats.get(
                 self.search.b,
                 if (ply == 0) null else self.search.stack[ply - 1].move,
                 move,
             );
 
-            self.score_list.appendAssumeCapacity(score);
+            self.score_list.appendAssumeCapacity(.{ .hist = hist, .add = add });
         }
     }
 

@@ -141,7 +141,7 @@ pub const Corrections = struct {
     }
 };
 
-pub const CentiHist = 1 << 4;
+pub const CentiHist = 1 << 6;
 
 pub const Stats = struct {
     butterfly: ButterflyHistory,

@@ -11,16 +11,14 @@ const hi = @import("history.zig");
 const see = @import("see.zig");
 
 pub const MaxDepth = 255;
-fn initLmr() [2][MaxDepth][64]i12 {
+fn initLmr() [MaxDepth][64]i12 {
     @setEvalBranchQuota(MaxDepth * 64);
-    var ret = std.mem.zeroes([2][MaxDepth][64]i12);
+    var ret = std.mem.zeroes([MaxDepth][64]i12);
 
     for (1..MaxDepth) |i| {
         for (1..64) |j| {
             const log = @log(@as(f64, @floatFromInt(i))) * @log(@as(f64, @floatFromInt(j)));
-
-            ret[0][i][j] = @intFromFloat(0.38 + log / 3.76);
-            ret[1][i][j] = @intFromFloat(2.01 + log / 2.32);
+            ret[i][j] = @intFromFloat(0.93 + log * 0.47);
         }
     }
 
@@ -31,10 +29,10 @@ fn initSeeCuts() [2][MaxDepth]i32 {
     var ret = std.mem.zeroes([2][MaxDepth]i32);
 
     for (1..MaxDepth) |i| {
-        const depth: comptime_float = @floatFromInt(i);
+        const depth: i32 = @intCast(i);
 
-        ret[0][i] = @intFromFloat(4 * -108.35 * depth);
-        ret[1][i] = @intFromFloat(4 * -13.78 * depth * depth);
+        ret[0][i] = -ev.CentiPawn * depth * depth;
+        ret[1][i] = -ev.CentiPawn * 6 * depth;
     }
 
     return ret;
@@ -76,6 +74,7 @@ pub const Searcher = struct {
     stack: []History,
     start_ply: u12,
     thread: *po.Thread,
+    nmp_ply: u12,
 
     stats: hi.Stats,
     corrections: hi.Corrections,
@@ -94,6 +93,7 @@ pub const Searcher = struct {
             .stack = stack,
             .start_ply = thread.board.hash_in,
             .thread = thread,
+            .nmp_ply = 0,
             .stats = hi.Stats.init(),
             .corrections = hi.Corrections.init(),
         };
@@ -259,7 +259,7 @@ pub const Searcher = struct {
                 self.stack[ply + 1].pv_size = 0;
             }
         }
-        if (alpha >= beta) return alpha;
+        if (alpha >= beta) return if (isMate(alpha)) alpha else @divTrunc(alpha + beta, 2);
 
         var pick = pi.Picker.init(.QuietSearchTT, self, &gen, hash_move, pawn_attacked, null);
         defer pick.deinit();
@@ -268,7 +268,7 @@ pub const Searcher = struct {
         var best_score = alpha;
 
         // Constants for pruning
-        const futility = eval + ev.CentiPawn * 8;
+        const futility = eval + ev.CentiPawn * 9;
 
         // Removing killer move
         self.stack[ply].killer = null;
@@ -279,26 +279,37 @@ pub const Searcher = struct {
 
         while (try pick.nextMove()) |move| {
             self.stack[ply].stage = pick.ret_stage;
-            self.stack[ply].hist_score = pick.current_val;
+            self.stack[ply].hist_score = if (pick.current_val) |v| v.hist else null;
             self.stack[ply].move = move;
             move_counter += 1;
 
             // Pruning
-            const followup = self.stack[ply - 1].move != null and
-                self.stack[ply - 1].move.?.to == move.to;
-            if (!isLoss(best_score) and !followup and !move.typ.promotion()) {
-                // Move count pruning
-                if (move_counter > 2) continue;
+            if (!isLoss(best_score)) {
+                const followup = self.stack[ply - 1].move != null and
+                    self.stack[ply - 1].move.?.to == move.to;
 
-                // Futility pruning
-                if (!self.stack[ply].in_check and self.b.isCapture(move)) {
-                    if (futility +
-                        ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
+                if (!self.stack[ply].in_check and
+                    !followup and
+                    !move.typ.promotion())
+                {
+                    // Move count pruning
+                    if (move_counter > 2) continue;
+
+                    // Futility pruning
+                    if (!self.stack[ply].in_check) {
+                        if (futility +
+                            ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))] <= alpha)
+                            continue;
+                    }
+
+                    // SEE
+                    if (!see.see(self.b, move, &gen, alpha - futility)) {
+                        best_score = @min(alpha, futility);
                         continue;
+                    }
                 }
 
-                // SEE
-                if (!see.see(self.b, move, &gen, 0)) continue;
+                if (!see.see(self.b, move, &gen, -ev.CentiPawn * 3)) continue;
             }
 
             const undo = self.b.apply(move);
@@ -333,6 +344,9 @@ pub const Searcher = struct {
 
             return drawVal();
         }
+
+        if (!isMate(best_score) and best_score > beta)
+            best_score = @divTrunc(best_score + beta, 2);
 
         // TT insert
         if (self.stack[ply].excluded == null) {
@@ -394,6 +408,7 @@ pub const Searcher = struct {
         const tte = tt.probe(self.b);
         const tte_fine = tte.reader != null and tte.usable;
         const tte_move = tte_fine and tte.reader.?.val.typ != .Upper;
+        const tte_pv = tte_fine and tte.reader.?.val.typ == .Exact;
         var tte_score = if (tte_fine) tte.reader.?.val.score else 0;
         const hash_move: ?tp.Move = if (root)
             self.thread.best_root.move
@@ -441,37 +456,41 @@ pub const Searcher = struct {
         }
 
         // Real Pruning
-        if (!self.stack[ply].in_check and
-            !root and
-            !pv and
-            self.stack[ply].excluded == null and
-            self.stack[ply - 1].move != null and
-            !isLoss(beta))
-        {
-            if (!tte_move) {
-                const futility = beta + ev.CentiPawn * 13 *
-                    @divFloor(depth - @intFromBool(improving), 2);
+        if (!self.stack[ply].in_check and !root and !pv) {
+            if (!tte_move or tte_score < alpha - ev.CentiPawn * 6) {
+                const futility = ev.CentiPawn * 4 * depth -
+                    (if (improving) ev.CentiPawn * 9 else 0);
                 const razor = if (isLoss(alpha))
                     alpha
                 else
-                    alpha - ev.CentiPawn * 14 * depth * depth;
+                    alpha - ev.CentiPawn * 12 * depth * depth;
 
                 // Reverse futility pruning (Depth for mate finding)
-                if (!isWin(eval) and depth < 15 and eval >= futility)
+                if (depth < 15 and
+                    !isWin(eval) and
+                    !isLoss(beta) and
+                    eval >= beta and
+                    eval >= beta + futility)
                     return beta + @divFloor(eval - beta, 3);
 
                 // Razoring
-                if (!improving and eval < razor)
+                if (eval < razor)
                     return try self.quietSearch(alpha, beta);
             }
 
             // Null move pruning
-            if (eval >= beta and
-                static >= beta - ev.CentiPawn * depth + 2 * ev.PawnBase and
-                cutnode and
+            if (depth >= 4 and
+                !isLoss(beta) and
+                self.stack[ply].excluded == null and
+                self.stack[ply - 1].move != null and
+                eval >= beta and
+                ply >= self.nmp_ply and
                 !self.stalemateDanger())
             {
-                const null_depth = @max(depth - 4 - @divFloor(depth, 4), 0);
+                const null_depth = @max(depth -
+                    4 -
+                    @divFloor(depth, 4) -
+                    @as(i12, @intCast(@min(@divFloor(eval - beta, ev.CentiPawn * 8), 5))), 0);
                 self.stack[ply].stage = null;
                 self.stack[ply].hist_score = null;
                 self.stack[ply].move = null;
@@ -481,14 +500,30 @@ pub const Searcher = struct {
                 const score = -try self.search(-beta, -beta + 1, null_depth, !cutnode);
                 self.b.removeNull(undo);
 
-                if (score >= beta) return if (isMate(score)) beta else score;
+                if (score >= beta) {
+                    // Verification search
+                    var ver = score;
+                    if (self.nmp_ply == 0 and (depth > 16 or isMate(score))) {
+                        self.nmp_ply = @intCast(ply + 3 * @divFloor(null_depth, 4));
+                        ver = try self.search(beta - 1, beta, null_depth, !cutnode);
+                        self.nmp_ply = 0;
+                    }
+
+                    if (ver >= beta) return if (isWin(score)) beta else score;
+                }
             }
 
             // Prob cut
             const improve_int: i32 = @intCast(@intFromBool(improving));
             const probcut_add = ev.CentiPawn * (8 - 2 * improve_int);
             const probcut_beta = beta + probcut_add;
-            if (depth >= 3 and (!tte_fine or eval >= probcut_beta)) {
+            if (depth >= 5 and
+                !isMate(beta) and
+                self.stack[ply].excluded == null and
+                !(tte_fine and
+                    tte.reader.?.val.depth >= depth - 3 and
+                    tte_score < probcut_beta))
+            {
                 var pick = pi.Picker.init(
                     .ProbCutTT,
                     self,
@@ -502,7 +537,7 @@ pub const Searcher = struct {
                 var stage = pick.stage;
                 while (try pick.nextMove()) |move| {
                     self.stack[ply].stage = stage;
-                    self.stack[ply].hist_score = pick.current_val;
+                    self.stack[ply].hist_score = if (pick.current_val) |v| v.hist else null;
                     self.stack[ply].move = move;
                     stage = pick.stage;
 
@@ -512,11 +547,11 @@ pub const Searcher = struct {
 
                     var score = -try self.quietSearch(-probcut_beta, -probcut_beta + 1);
 
-                    if (score >= probcut_beta and depth > 4)
+                    if (score >= probcut_beta and depth > 5)
                         score = -try self.search(
                             -probcut_beta,
                             -probcut_beta + 1,
-                            depth - 4,
+                            depth - 5,
                             !cutnode,
                         );
 
@@ -524,21 +559,9 @@ pub const Searcher = struct {
                     self.b.remove(move, undo);
 
                     if (score >= probcut_beta) {
-                        if (isMate(score)) return score;
-
-                        // Store ProbCut data
-                        tt.store(
-                            self.b,
-                            score - probcut_add,
-                            static,
-                            depth,
-                            probcut_beta - 1,
-                            probcut_beta,
-                            move,
-                            self.start_ply,
-                            tte,
-                        );
-                        return score - probcut_add;
+                        // if (isMate(score)) return score;
+                        // return score - probcut_add;
+                        return score;
                     }
                 }
             }
@@ -548,7 +571,7 @@ pub const Searcher = struct {
         defer pick.deinit();
 
         // Constants for pruning
-        const futility = eval + ev.CentiPawn * 11;
+        const futility = static + ev.CentiPawn * 5;
 
         // Constants for LMR
         const tt_capture = tte_move and self.b.isNoisy(hash_move.?);
@@ -574,40 +597,56 @@ pub const Searcher = struct {
             const start_nodes = self.thread.nodes;
 
             self.stack[ply].stage = pick.ret_stage;
-            self.stack[ply].hist_score = pick.current_val;
+            self.stack[ply].hist_score = if (pick.current_val) |v| v.hist else null;
             self.stack[ply].move = move;
             move_counter += 1;
 
             var next_depth = depth - 1;
             var score: i32 = undefined;
 
-            const quiet = !self.b.isNoisy(move);
             var r_depth = next_depth;
             if (!root and !isLoss(best_score)) {
-                var R: i12 = 0;
                 const depth_index: u8 = @intCast(@min(MaxDepth - 1, depth));
                 const move_index: u6 = @intCast(@min(63, move_counter));
-                R += LMR[@intFromBool(quiet)][depth_index][move_index];
-                if (pick.current_val) |h|
-                    R -= @intCast(std.math.clamp(@divFloor(h, 4 * hi.CentiHist), -3, 2));
+                var R = LMR[depth_index][move_index];
 
-                // Reduce more
+                // Increase reduction if not improving
+                if (!improving) R += @max(1, @divFloor(R, 2));
+
+                // Adjust reduction based on history
+                if (self.stack[ply].hist_score) |h|
+                    R -= @intCast(@divTrunc(
+                        h - ev.CentiPawn * hi.CentiHist * 10,
+                        8 * ev.CentiPawn * hi.CentiHist,
+                    ));
+
+                // Increase reduction for cutnodes
                 if (cutnode) {
                     R += 2;
                     R += @intFromBool(tte_move);
                 }
-                if (tt_capture) R += 1;
-                if (tte_fine and tte.reader.?.val.typ == .Exact) R += 1;
-                if (!improving) R += 1;
 
-                // We do wanna reduce these more
+                // Increase reduction if tt move exists and is a capture
+                if (tt_capture) {
+                    R += 1;
+                    R += @intFromBool(depth < 8);
+                }
+
+                // We save some depth for a probable research
+                if (!pv and tte_pv and self.stack[ply].excluded == null)
+                    R += @min(depth - tte.reader.?.val.depth, 2);
+
+                // Increase reduction if there are cut offs at the next ply
+                if (self.stack[ply].killer != null) R += 1;
+
+                // Decrease reduction in pv nodes
                 if (pv) R -= 1;
+
+                // Adjust reduction based on move type
                 R -= switch (self.stack[ply].stage.?) {
                     .TT => 2,
-                    .GoodCaptures => 1,
-                    .Killer => 1,
-                    .GoodQuiets => 0,
-                    .BadCaptures => 0,
+                    .GoodCaptures, .Killer => 1,
+                    .GoodQuiets, .BadCaptures => 0,
                     .BadQuiets => -1,
                     else => unreachable,
                 };
@@ -624,41 +663,41 @@ pub const Searcher = struct {
 
                 // Futility pruning
                 if (self.b.isCapture(move)) {
-                    if (r_depth < 7 and !self.stack[ply].in_check) {
+                    if (r_depth < 8 and !self.stack[ply].in_check) {
                         const futil_val = futility + 8 * ev.CentiPawn * r_depth +
                             ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))];
                         if (futil_val <= alpha) continue;
                     }
+
+                    // SEE pruning (captures)
+                    if (!see.see(self.b, move, &gen, SEE_CUTS[1][@intCast(depth)]))
+                        continue;
                 } else {
-                    if (r_depth < 12 and !self.stack[ply].in_check) {
-                        const futil_val = futility + 6 * ev.CentiPawn * r_depth;
+                    if (r_depth < 16 and !self.stack[ply].in_check) {
+                        const futil_val = futility + 4 * ev.CentiPawn * r_depth;
                         if (futil_val <= alpha) {
                             if (!isMate(best_score) and
-                                !isMate(futil_val) and
+                                !isWin(futil_val) and
                                 best_score < futil_val)
                                 best_score = futil_val;
                             continue;
                         }
                     }
-                }
 
-                // SEE pruning
-                if (!see.see(
-                    self.b,
-                    move,
-                    &gen,
-                    SEE_CUTS[@intFromBool(quiet)][@intCast(r_depth)],
-                )) continue;
+                    // SEE pruning (quiets)
+                    if (!see.see(self.b, move, &gen, SEE_CUTS[0][@intCast(r_depth)]))
+                        continue;
+                }
             }
 
             // Extensions
             var E: i12 = 0;
             if (!root and self.stack[ply].excluded == null) {
                 // Singular extension and multi cut
-                if (depth >= 6 + @as(i12, @intCast(@intFromBool(pv))) and
-                    self.stack[ply].stage == .TT and
+                if (self.stack[ply].stage == .TT and
+                    depth >= 6 + @as(i12, @intCast(@intFromBool(tte_pv))) and
                     tte.reader.?.val.depth + 3 >= depth and
-                    tte.reader.?.val.typ == .Lower and
+                    tte.reader.?.val.typ != .Upper and
                     !isMate(tte_score))
                 {
                     const pv_int: i32 = @intCast(@intFromBool(pv));
@@ -765,10 +804,13 @@ pub const Searcher = struct {
         // Check and stalemate
         if (move_counter == 0) {
             if (self.stack[ply].excluded != null) return alpha;
-
-            return if (self.stack[ply].in_check) mateVal(ply) else drawVal();
+            best_score = if (self.stack[ply].in_check) mateVal(ply) else drawVal();
         }
 
+        // if (!isMate(best_score) and best_score > beta)
+        //     best_score = @divTrunc(best_score + beta, 2);
+
+        // Update Stats
         if (best_move != null) {
             self.stats.update(
                 self.b,
@@ -782,13 +824,12 @@ pub const Searcher = struct {
         // Update Corrections
         const prev = if (ply >= 2) self.stack[ply - 2].move else null;
         const move = if (ply >= 1) self.stack[ply - 1].move else null;
-        if (!self.stack[ply].in_check and
+        if (move_counter > 0 and
+            !self.stack[ply].in_check and
             (best_move == null or !self.b.isCapture(best_move.?)) and
             !(best_score >= beta and best_score <= static) and
             !(best_move == null and best_score >= static))
-        {
             self.corrections.update(self.b, prev, move, depth, best_score, static);
-        }
 
         // TT insert
         if (self.stack[ply].excluded == null and !root) {
@@ -828,7 +869,7 @@ pub const Searcher = struct {
             const score = try self.search(alpha, beta, depth, false);
 
             if (score <= alpha) {
-                beta = @divFloor(alpha + beta, 2);
+                beta = @divTrunc(alpha + beta, 2);
                 alpha = score - delta;
                 if (alpha < -MateVal) alpha = -MateVal;
             } else if (score >= beta) {
