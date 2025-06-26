@@ -611,7 +611,7 @@ pub const Searcher = struct {
                 var R = LMR[depth_index][move_index];
 
                 // Increase reduction if not improving
-                if (!improving) R += @max(1, @divFloor(R, 2));
+                if (!improving) R += 1;
 
                 // Adjust reduction based on history
                 if (self.stack[ply].hist_score) |h|
@@ -709,7 +709,7 @@ pub const Searcher = struct {
                         sing - 1,
                         sing,
                         @divFloor(next_depth, 2),
-                        !cutnode,
+                        cutnode,
                     );
                     self.stack[ply].excluded = null;
 
