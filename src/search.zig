@@ -409,6 +409,7 @@ pub const Searcher = struct {
         const tte_fine = tte.reader != null and tte.usable;
         const tte_move = tte_fine and tte.reader.?.val.typ != .Upper;
         const tte_pv = tte_fine and tte.reader.?.val.typ == .Exact;
+
         var tte_score = if (tte_fine) tte.reader.?.val.score else 0;
         const hash_move: ?tp.Move = if (root)
             self.thread.best_root.move
@@ -416,6 +417,7 @@ pub const Searcher = struct {
             tte.reader.?.val.move
         else
             null;
+        const tte_depth: i12 = if (tte_fine) @intCast(tte.reader.?.val.depth) else 0;
 
         // Fix TT mate distance
         if (tte_fine and isMate(tte_score)) {
@@ -431,7 +433,7 @@ pub const Searcher = struct {
             !root and
             self.stack[ply].excluded == null and
             tte_fine and
-            tte.reader.?.val.depth >= depth and
+            tte_depth >= depth and
             tte.reader.?.usable(tte_score, alpha, beta))
             return tte_score;
 
@@ -521,7 +523,7 @@ pub const Searcher = struct {
                 !isMate(beta) and
                 self.stack[ply].excluded == null and
                 !(tte_fine and
-                    tte.reader.?.val.depth >= depth - 3 and
+                    tte_depth >= depth - 3 and
                     tte_score < probcut_beta))
             {
                 var pick = pi.Picker.init(
@@ -634,7 +636,7 @@ pub const Searcher = struct {
 
                 // We save some depth for a probable research
                 if (!pv and tte_pv and self.stack[ply].excluded == null)
-                    R += @min(depth - tte.reader.?.val.depth, 2);
+                    R += @min(depth - tte_depth, 2);
 
                 // Increase reduction if there are cut offs at the next ply
                 if (self.stack[ply].killer != null) R += 1;
@@ -696,7 +698,7 @@ pub const Searcher = struct {
                 // Singular extension and multi cut
                 if (self.stack[ply].stage == .TT and
                     depth >= 6 + @as(i12, @intCast(@intFromBool(tte_pv))) and
-                    tte.reader.?.val.depth + 3 >= depth and
+                    tte_depth >= depth - 3 and
                     tte.reader.?.val.typ != .Upper and
                     !isMate(tte_score))
                 {
@@ -887,6 +889,7 @@ pub const Searcher = struct {
         var score: i32 = -MateVal;
         while (true) {
             const se_depth: i12 = @intFromFloat(depth + 0.5);
+            if (se_depth <= 0) break;
 
             // For the start, we just do a normal search
             if (score == -MateVal) {
