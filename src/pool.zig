@@ -66,11 +66,11 @@ fn initPool(b: *const bo.Board, nnw: *nn.NN) !bool {
 
     nnw.inputAccum(b);
 
-    var list = std.ArrayList(tp.Move).init(std.heap.c_allocator);
-    defer list.deinit();
+    var list = std.ArrayList(tp.Move).empty;
+    defer list.deinit(std.heap.c_allocator);
     const gen = mv.Maker.init(b);
-    try gen.gen(&list, .Either);
-    try gen.gen(&list, .Castle);
+    try gen.gen(&list, std.heap.c_allocator, .Either);
+    try gen.gen(&list, std.heap.c_allocator, .Castle);
 
     if (list.items.len == 0) return true;
 
@@ -85,9 +85,9 @@ fn initPool(b: *const bo.Board, nnw: *nn.NN) !bool {
         Pool[i].iter = 1 + max_iter_add * (@as(f32, @floatFromInt(i + 1)) / float_size);
         Pool[i].stopped = false;
 
-        Pool[i].root_moves = std.ArrayList(RootMove).init(std.heap.c_allocator);
+        Pool[i].root_moves = std.ArrayList(RootMove).empty;
 
-        try Pool[i].root_moves.ensureTotalCapacity(list.items.len);
+        try Pool[i].root_moves.ensureTotalCapacity(std.heap.c_allocator, list.items.len);
         for (list.items) |move| {
             Pool[i].root_moves.appendAssumeCapacity(.{
                 .move = move,
@@ -111,7 +111,7 @@ fn initPool(b: *const bo.Board, nnw: *nn.NN) !bool {
 inline fn deinitPool() void {
     inline for (0..PoolSize) |i| {
         Pool[i].search.deinit();
-        Pool[i].root_moves.deinit();
+        Pool[i].root_moves.deinit(std.heap.c_allocator);
     }
 }
 

@@ -37,8 +37,9 @@ pub const NN = struct {
         const file = try std.fs.cwd().openFile(folder ++ net, .{ .mode = .read_only });
         defer file.close();
 
-        var buf_reader = std.io.bufferedReader(file.reader());
-        var reader = buf_reader.reader();
+        var buf: [@sizeOf(Net)]u8 = undefined;
+        var f_reader = file.reader(&buf);
+        var reader = &f_reader.interface;
 
         return .{
             .accum_w = std.mem.zeroes([AccumSize]i16),
@@ -46,7 +47,7 @@ pub const NN = struct {
             .infos = std.mem.zeroes([2048]Info),
             .pos = 0,
             .lazy_pos = 0,
-            .network = try reader.readStructEndian(Net, .little),
+            .network = try reader.takeStruct(Net, .little),
         };
     }
 

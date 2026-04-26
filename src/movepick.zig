@@ -78,8 +78,8 @@ pub const Picker = struct {
         return .{
             .search = search,
             .gen = gen,
-            .list = .init(search.alloc),
-            .score_list = .init(search.alloc),
+            .list = .empty,
+            .score_list = .empty,
             .start = 0,
             .pawn_attacked = pawn_attacked,
             .stage = stage,
@@ -95,8 +95,8 @@ pub const Picker = struct {
     }
 
     pub inline fn deinit(self: *Picker) void {
-        self.list.deinit();
-        self.score_list.deinit();
+        self.list.deinit(self.search.alloc);
+        self.score_list.deinit(self.search.alloc);
     }
 
     fn goodCapturesFilter(pick: *const Picker, move: tp.Move, score: i32) bool {
@@ -174,7 +174,7 @@ pub const Picker = struct {
     inline fn scoreMoves(self: *Picker, start: usize) !void {
         const ply = self.search.b.hash_in - self.search.start_ply;
 
-        try self.score_list.ensureTotalCapacity(self.list.items.len);
+        try self.score_list.ensureTotalCapacity(self.search.alloc, self.list.items.len);
         for (start..self.list.items.len) |i| {
             const move = self.list.items[i];
             var add: i32 = 0;
@@ -229,7 +229,7 @@ pub const Picker = struct {
             },
             .GenCaptures => {
                 const start = self.list.items.len;
-                try self.gen.gen(&self.list, .Noisy);
+                try self.gen.gen(&self.list, self.search.alloc, .Noisy);
                 try self.scoreMoves(start);
 
                 self.nextStage(.GoodCaptures, false);
@@ -260,8 +260,8 @@ pub const Picker = struct {
                     self.nextStage(.GoodQuiets, false)
                 else {
                     const start = self.list.items.len;
-                    try self.gen.gen(&self.list, .Quiet);
-                    try self.gen.gen(&self.list, .Castle);
+                    try self.gen.gen(&self.list, self.search.alloc, .Quiet);
+                    try self.gen.gen(&self.list, self.search.alloc, .Castle);
 
                     try self.scoreMoves(start);
 
@@ -317,7 +317,7 @@ pub const Picker = struct {
             },
             .GenProbCut => {
                 const start = self.list.items.len;
-                try self.gen.gen(&self.list, .Noisy);
+                try self.gen.gen(&self.list, self.search.alloc, .Noisy);
                 try self.scoreMoves(start);
 
                 self.nextStage(.ProbCut, false);
@@ -346,9 +346,9 @@ pub const Picker = struct {
             .GenQuietSearch => {
                 const start = self.list.items.len;
                 if (self.gen.checks > 0)
-                    try self.gen.gen(&self.list, .Either)
+                    try self.gen.gen(&self.list, self.search.alloc, .Either)
                 else
-                    try self.gen.gen(&self.list, .Noisy);
+                    try self.gen.gen(&self.list, self.search.alloc, .Noisy);
 
                 try self.scoreMoves(start);
 

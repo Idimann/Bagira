@@ -37,6 +37,7 @@ pub const Maker = struct {
         self: *const Maker,
         sq: tp.Square,
         list: *std.ArrayList(tp.Move),
+        alloc: std.mem.Allocator,
         p: PinState,
         cap: MoveType,
     ) !void {
@@ -54,12 +55,12 @@ pub const Maker = struct {
             if ((cap == .Either or (cap == .Noisy) == (next.rank() == prom_rank)) and
                 self.al.check(next))
             {
-                if (next.rank() == prom_rank) try list.appendSlice(&[_]tp.Move{
+                if (next.rank() == prom_rank) try list.appendSlice(alloc, &[_]tp.Move{
                     .{ .from = sq, .to = next, .typ = .PromKnight },
                     .{ .from = sq, .to = next, .typ = .PromBishop },
                     .{ .from = sq, .to = next, .typ = .PromRook },
                     .{ .from = sq, .to = next, .typ = .PromQueen },
-                }) else try list.append(.{ .from = sq, .to = next, .typ = .Normal });
+                }) else try list.append(alloc, .{ .from = sq, .to = next, .typ = .Normal });
             }
             // Moving two forward
             if (cap != .Noisy and sq.rank() == double_rank) {
@@ -69,7 +70,7 @@ pub const Maker = struct {
                     next.getApply(.South);
 
                 if (!self.dat.combi.check(next2) and self.al.check(next2))
-                    try list.append(.{ .from = sq, .to = next2, .typ = .Normal });
+                    try list.append(alloc, .{ .from = sq, .to = next2, .typ = .Normal });
             }
         }
 
@@ -86,7 +87,7 @@ pub const Maker = struct {
                     hit.v &= tp.AntiDiagonalMask[sq.antiDiagonal()].v;
             }
             const num = if (next.rank() == prom_rank) hit.popcount() else hit.popcount() * 4;
-            try list.ensureUnusedCapacity(num);
+            try list.ensureUnusedCapacity(alloc, num);
             while (hit.popLsb()) |to| {
                 if (to.rank() == prom_rank) {
                     list.appendSliceAssumeCapacity(&[_]tp.Move{
@@ -111,7 +112,7 @@ pub const Maker = struct {
                     en_passant.v &= tp.AntiDiagonalMask[sq.antiDiagonal()].v;
             }
             if (en_passant.lsb()) |to|
-                try list.append(.{ .from = sq, .to = to, .typ = .EnPassant });
+                try list.append(alloc, .{ .from = sq, .to = to, .typ = .EnPassant });
         }
     }
 
@@ -200,6 +201,7 @@ pub const Maker = struct {
         self: *const Maker,
         sq: tp.Square,
         list: *std.ArrayList(tp.Move),
+        alloc: std.mem.Allocator,
         cap: MoveType,
     ) !void {
         var iter = ta.KingAttacks[@intFromEnum(sq)]
@@ -210,7 +212,7 @@ pub const Maker = struct {
             iter = iter.without(self.dat.their);
         while (iter.popLsb()) |to| {
             if (self.attack_count(to, self.dat.our_king) == 0)
-                try list.append(.{ .from = sq, .to = to, .typ = .Normal });
+                try list.append(alloc, .{ .from = sq, .to = to, .typ = .Normal });
         }
     }
 
@@ -232,6 +234,7 @@ pub const Maker = struct {
         self: *const Maker,
         sq: tp.Square,
         list: *std.ArrayList(tp.Move),
+        alloc: std.mem.Allocator,
         p: PinState,
         cap: MoveType,
     ) !void {
@@ -243,7 +246,7 @@ pub const Maker = struct {
                 iter.v &= self.dat.their.v
             else if (cap == .Quiet)
                 iter = iter.without(self.dat.their);
-            try list.ensureUnusedCapacity(iter.popcount());
+            try list.ensureUnusedCapacity(alloc, iter.popcount());
             while (iter.popLsb()) |to|
                 list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
         }
@@ -267,6 +270,7 @@ pub const Maker = struct {
         self: *const Maker,
         sq: tp.Square,
         list: *std.ArrayList(tp.Move),
+        alloc: std.mem.Allocator,
         p: PinState,
         cap: MoveType,
     ) !void {
@@ -284,7 +288,7 @@ pub const Maker = struct {
                 else
                     iter.v &= tp.FileMask[@intFromEnum(sq.file())].v;
             }
-            try list.ensureUnusedCapacity(iter.popcount());
+            try list.ensureUnusedCapacity(alloc, iter.popcount());
             while (iter.popLsb()) |to|
                 list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
         }
@@ -317,6 +321,7 @@ pub const Maker = struct {
         self: *const Maker,
         sq: tp.Square,
         list: *std.ArrayList(tp.Move),
+        alloc: std.mem.Allocator,
         p: PinState,
         cap: MoveType,
     ) !void {
@@ -334,7 +339,7 @@ pub const Maker = struct {
                 else
                     iter.v &= tp.AntiDiagonalMask[sq.antiDiagonal()].v;
             }
-            try list.ensureUnusedCapacity(iter.popcount());
+            try list.ensureUnusedCapacity(alloc, iter.popcount());
             while (iter.popLsb()) |to|
                 list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
         }
@@ -634,7 +639,12 @@ pub const Maker = struct {
         return false;
     }
 
-    pub fn gen(self: *const Maker, list: *std.ArrayList(tp.Move), typ: MoveType) !void {
+    pub fn gen(
+        self: *const Maker,
+        list: *std.ArrayList(tp.Move),
+        alloc: std.mem.Allocator,
+        typ: MoveType,
+    ) !void {
         if (typ != .Castle) {
             var iter = self.dat.our;
             while (iter.popLsb()) |sq| {
@@ -647,17 +657,17 @@ pub const Maker = struct {
                         .None;
 
                 if (self.dat.our_king == sq)
-                    try self.genKing(sq, list, typ)
+                    try self.genKing(sq, list, alloc, typ)
                 else if (self.checks < 2) {
                     if (self.b.pawns.check(sq))
-                        try self.genPawn(sq, list, pin_state, typ)
+                        try self.genPawn(sq, list, alloc, pin_state, typ)
                     else {
                         const lin = self.b.lines.check(sq);
                         const dia = self.b.diags.check(sq);
 
-                        if (lin) try self.genLine(sq, list, pin_state, typ);
-                        if (dia) try self.genDiag(sq, list, pin_state, typ);
-                        if (!lin and !dia) try self.genKnight(sq, list, pin_state, typ);
+                        if (lin) try self.genLine(sq, list, alloc, pin_state, typ);
+                        if (dia) try self.genDiag(sq, list, alloc, pin_state, typ);
+                        if (!lin and !dia) try self.genKnight(sq, list, alloc, pin_state, typ);
                     }
                 }
             }
@@ -668,13 +678,19 @@ pub const Maker = struct {
                         !self.dat.combi.check(.g1) and
                         self.attack_count(.f1, .f1) == 0 and
                         self.attack_count(.g1, .g1) == 0)
-                        try list.append(.{ .from = .e1, .to = .g1, .typ = .CastleKingside });
+                        try list.append(
+                            alloc,
+                            .{ .from = .e1, .to = .g1, .typ = .CastleKingside },
+                        );
                 } else {
                     if (!self.dat.combi.check(.f8) and
                         !self.dat.combi.check(.g8) and
                         self.attack_count(.f8, .f8) == 0 and
                         self.attack_count(.g8, .g8) == 0)
-                        try list.append(.{ .from = .e8, .to = .g8, .typ = .CastleKingside });
+                        try list.append(
+                            alloc,
+                            .{ .from = .e8, .to = .g8, .typ = .CastleKingside },
+                        );
                 }
             }
             if (if (self.b.side == .White) self.b.castle.wq else self.b.castle.bq) {
@@ -684,14 +700,20 @@ pub const Maker = struct {
                         !self.dat.combi.check(.b1) and
                         self.attack_count(.d1, .d1) == 0 and
                         self.attack_count(.c1, .c1) == 0)
-                        try list.append(.{ .from = .e1, .to = .c1, .typ = .CastleQueenside });
+                        try list.append(
+                            alloc,
+                            .{ .from = .e1, .to = .c1, .typ = .CastleQueenside },
+                        );
                 } else {
                     if (!self.dat.combi.check(.d8) and
                         !self.dat.combi.check(.c8) and
                         !self.dat.combi.check(.b8) and
                         self.attack_count(.d8, .d8) == 0 and
                         self.attack_count(.c8, .c8) == 0)
-                        try list.append(.{ .from = .e8, .to = .c8, .typ = .CastleQueenside });
+                        try list.append(
+                            alloc,
+                            .{ .from = .e8, .to = .c8, .typ = .CastleQueenside },
+                        );
                 }
             }
         }

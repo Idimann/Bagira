@@ -16,7 +16,7 @@ pub fn main() !void {
     defer tt.deinit(std.heap.c_allocator);
 
     var nnw = try nn.NN.init("networks/", "v2_2.bin");
-    var b = try bo.Board.fromFen(pos.start);
+    var b = try bo.Board.fromFen("8/8/8/4Q3/2k1p3/4K3/2P5/8 w -- 7 51");
 
     try pl.play(&b, &nnw, .Black, 1000, false);
     // try pl.selfPlay(&b, &nnw, 600, true);

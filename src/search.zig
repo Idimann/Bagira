@@ -582,7 +582,7 @@ pub const Searcher = struct {
         var best_score: i32 = -MateVal;
 
         var histories = try std.ArrayList(tp.Move).initCapacity(self.alloc, 64);
-        defer histories.deinit();
+        defer histories.deinit(self.alloc);
 
         // Removing killer move
         self.stack[ply].killer = null;
@@ -782,7 +782,7 @@ pub const Searcher = struct {
                 } else rm.score = -MateVal;
             }
 
-            try histories.append(move);
+            try histories.append(self.alloc, move);
             if (score > best_score) {
                 best_score = score;
 
@@ -806,7 +806,12 @@ pub const Searcher = struct {
         // Check and stalemate
         if (move_counter == 0) {
             if (self.stack[ply].excluded != null) return alpha;
-            best_score = if (self.stack[ply].in_check) mateVal(ply) else drawVal();
+            // best_score = if (self.stack[ply].in_check) mateVal(ply) else drawVal();
+            // This doesn't work for some insane reason, the one below does
+            if (self.stack[ply].in_check)
+                best_score = mateVal(ply)
+            else
+                best_score = drawVal();
         }
 
         // if (!isMate(best_score) and best_score > beta)

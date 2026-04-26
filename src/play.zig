@@ -10,11 +10,12 @@ const ev = @import("eval.zig");
 pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
     if (dep == 0) return 1;
 
-    var list = std.ArrayList(tp.Move).init(alloc);
+    var list = std.ArrayList(tp.Move).empty;
+    defer list.deinit(alloc);
 
     const maker = mv.Maker.init(b);
-    try maker.gen(&list, .Either);
-    try maker.gen(&list, .Castle);
+    try maker.gen(&list, alloc, .Either);
+    try maker.gen(&list, alloc, .Castle);
 
     var ret: usize = 0;
     for (list.items) |mov| {
@@ -24,16 +25,16 @@ pub fn perft(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
         b.remove(mov, undo);
     }
 
-    list.deinit();
     return ret;
 }
 
 pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
-    var list = std.ArrayList(tp.Move).init(alloc);
+    var list = std.ArrayList(tp.Move).empty;
+    defer list.deinit(alloc);
 
     const maker = mv.Maker.init(b);
-    try maker.gen(&list, .Either);
-    try maker.gen(&list, .Castle);
+    try maker.gen(&list, alloc, .Either);
+    try maker.gen(&list, alloc, .Castle);
 
     var total: usize = 0;
     for (list.items) |mov| {
@@ -46,8 +47,6 @@ pub fn perft_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
         total += res;
     }
     std.debug.print("Total: {}\n", .{total});
-
-    list.deinit();
 }
 
 inline fn rand_move() !tp.Move {
@@ -68,11 +67,12 @@ inline fn rand_move() !tp.Move {
 pub fn legals(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
     if (dep == 0) return 0;
 
-    var list = std.ArrayList(tp.Move).init(alloc);
+    var list = std.ArrayList(tp.Move).empty;
+    defer list.deinit(alloc);
 
     const maker = mv.Maker.init(b);
-    try maker.gen(&list, .Either);
-    try maker.gen(&list, .Castle);
+    try maker.gen(&list, alloc, .Either);
+    try maker.gen(&list, alloc, .Castle);
 
     var ret: usize = 0;
     var random = std.mem.zeroes(tp.Move);
@@ -94,16 +94,16 @@ pub fn legals(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !usize {
 
     if (!found) ret += 1;
 
-    list.deinit();
     return ret;
 }
 
 pub fn legals_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
-    var list = std.ArrayList(tp.Move).init(alloc);
+    var list = std.ArrayList(tp.Move).empty;
+    defer list.deinit(alloc);
 
     const maker = mv.Maker.init(b);
-    try maker.gen(&list, .Either);
-    try maker.gen(&list, .Castle);
+    try maker.gen(&list, alloc, .Either);
+    try maker.gen(&list, alloc, .Castle);
 
     var total: usize = 0;
     for (list.items) |mov| {
@@ -116,23 +116,24 @@ pub fn legals_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
         total += res;
     }
     std.debug.print("Total: {}\n", .{total});
-
-    list.deinit();
 }
 
 pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool) !void {
     if (b.side == player) {
-        const stdin = std.io.getStdIn().reader();
-        _ = try stdin.readByte();
+        var buf: [3]u8 = undefined;
+        var reader = std.fs.File.stdin().reader(&buf);
+        var stdin = &reader.interface;
+        _ = try stdin.takeByte();
 
         var buffer: [256]u8 = undefined;
         var fba = std.heap.FixedBufferAllocator.init(&buffer);
         const alloc = fba.allocator();
-        var list = std.ArrayList(tp.Move).init(alloc);
+        var list = std.ArrayList(tp.Move).empty;
+        defer list.deinit(alloc);
 
         var gen = mv.Maker.init(b);
-        try gen.gen(&list, .Either);
-        try gen.gen(&list, .Castle);
+        try gen.gen(&list, alloc, .Either);
+        try gen.gen(&list, alloc, .Castle);
 
         if (list.items.len == 0) {
             if (gen.checks > 0)
@@ -143,8 +144,8 @@ pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool
         }
 
         mv.printList(&list);
-        var buf: [3]u8 = undefined;
-        while (try stdin.readUntilDelimiterOrEof(buf[0..], '\n')) |user_input| {
+        while (true) {
+            const user_input = try stdin.takeDelimiterExclusive('\n');
             const in = try std.fmt.parseInt(u8, user_input, 10);
             if (list.items.len < in) continue;
 
