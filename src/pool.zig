@@ -58,7 +58,7 @@ pub const Thread = struct {
     }
 };
 
-const PoolSize = 1;
+const PoolSize = 8;
 var Pool: [PoolSize]Thread = undefined;
 fn initPool(b: *const bo.Board, nnw: *nn.NN) !bool {
     const float_size: f32 = @floatFromInt(PoolSize);
