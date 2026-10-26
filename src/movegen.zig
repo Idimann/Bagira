@@ -86,17 +86,15 @@ pub const Maker = struct {
                 else
                     hit.v &= tp.AntiDiagonalMask[sq.antiDiagonal()].v;
             }
-            const num = if (next.rank() == prom_rank) hit.popcount() else hit.popcount() * 4;
-            try list.ensureUnusedCapacity(alloc, num);
             while (hit.popLsb()) |to| {
                 if (to.rank() == prom_rank) {
-                    list.appendSliceAssumeCapacity(&[_]tp.Move{
+                    try list.appendSlice(alloc, &[_]tp.Move{
                         .{ .from = sq, .to = to, .typ = .PromKnight },
                         .{ .from = sq, .to = to, .typ = .PromBishop },
                         .{ .from = sq, .to = to, .typ = .PromRook },
                         .{ .from = sq, .to = to, .typ = .PromQueen },
                     });
-                } else list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
+                } else try list.append(alloc, .{ .from = sq, .to = to, .typ = .Normal });
             }
 
             var en_passant = (if (self.b.side == .White)
@@ -246,9 +244,8 @@ pub const Maker = struct {
                 iter.v &= self.dat.their.v
             else if (cap == .Quiet)
                 iter = iter.without(self.dat.their);
-            try list.ensureUnusedCapacity(alloc, iter.popcount());
             while (iter.popLsb()) |to|
-                list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
+                try list.append(alloc, .{ .from = sq, .to = to, .typ = .Normal });
         }
     }
 
@@ -288,9 +285,8 @@ pub const Maker = struct {
                 else
                     iter.v &= tp.FileMask[@intFromEnum(sq.file())].v;
             }
-            try list.ensureUnusedCapacity(alloc, iter.popcount());
             while (iter.popLsb()) |to|
-                list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
+                try list.append(alloc, .{ .from = sq, .to = to, .typ = .Normal });
         }
     }
 
@@ -339,9 +335,8 @@ pub const Maker = struct {
                 else
                     iter.v &= tp.AntiDiagonalMask[sq.antiDiagonal()].v;
             }
-            try list.ensureUnusedCapacity(alloc, iter.popcount());
             while (iter.popLsb()) |to|
-                list.appendAssumeCapacity(.{ .from = sq, .to = to, .typ = .Normal });
+                try list.append(alloc, .{ .from = sq, .to = to, .typ = .Normal });
         }
     }
 

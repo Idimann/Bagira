@@ -33,12 +33,12 @@ pub const NN = struct {
 
     network: Net,
 
-    pub fn init(comptime folder: anytype, comptime net: anytype) !NN {
-        const file = try std.fs.cwd().openFile(folder ++ net, .{ .mode = .read_only });
-        defer file.close();
+    pub fn init(comptime folder: anytype, comptime net: anytype, io: std.Io) !NN {
+        const file = try std.Io.Dir.cwd().openFile(io, folder ++ net, .{ .mode = .read_only });
+        defer file.close(io);
 
         var buf: [@sizeOf(Net)]u8 = undefined;
-        var f_reader = file.reader(&buf);
+        var f_reader = file.reader(io, &buf);
         var reader = &f_reader.interface;
 
         return .{

@@ -38,6 +38,18 @@ fn initSeeCuts() [2][MaxDepth]i32 {
     return ret;
 }
 
+fn initFutilityCuts() [MaxDepth]i32 {
+    var ret = std.mem.zeroes([MaxDepth]i32);
+
+    for (1..MaxDepth) |i| {
+        const depth: i32 = @intCast(i);
+        const log = @log(@as(f64, @floatFromInt(depth)));
+        ret[i] = @intFromFloat(log);
+    }
+
+    return ret;
+}
+
 fn initLmp() [2][MaxDepth]i32 {
     var ret = std.mem.zeroes([2][MaxDepth]i32);
 
@@ -54,6 +66,7 @@ fn initLmp() [2][MaxDepth]i32 {
 const LMR = initLmr();
 const SEE_CUTS = initSeeCuts();
 const LMP = initLmp();
+const FUTILITY_CUTS = initFutilityCuts();
 
 const History = struct {
     static: i32,
@@ -666,7 +679,8 @@ pub const Searcher = struct {
                 // Futility pruning
                 if (self.b.isCapture(move)) {
                     if (r_depth < 8 and !self.stack[ply].in_check) {
-                        const futil_val = futility + 8 * ev.CentiPawn * r_depth +
+                        const futil_val = futility + 8 * ev.CentiPawn *
+                            FUTILITY_CUTS[@intCast(r_depth)] +
                             ev.PieceValue[@intFromEnum(self.b.pieceType(move.to))];
                         if (futil_val <= alpha) continue;
                     }
@@ -676,7 +690,8 @@ pub const Searcher = struct {
                         continue;
                 } else {
                     if (r_depth < 16 and !self.stack[ply].in_check) {
-                        const futil_val = futility + 4 * ev.CentiPawn * r_depth;
+                        const futil_val = futility + 4 * ev.CentiPawn *
+                            FUTILITY_CUTS[@intCast(r_depth)];
                         if (futil_val <= alpha) {
                             if (!isMate(best_score) and
                                 !isWin(futil_val) and

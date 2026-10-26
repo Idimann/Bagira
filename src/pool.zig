@@ -74,7 +74,7 @@ fn initPool(b: *const bo.Board, nnw: *nn.NN) !bool {
 
     if (list.items.len == 0) return true;
 
-    inline for (0..PoolSize) |i| {
+    for (0..PoolSize) |i| {
         Pool[i].thread = null;
 
         Pool[i].board = b.*;
@@ -132,15 +132,17 @@ inline fn stopSearch() void {
     }
 }
 
-pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64) !?RootMove {
-    const start = std.time.milliTimestamp();
+pub fn bestMove(b: *bo.Board, nnw: *nn.NN, time: i64, io: std.Io) !?RootMove {
+    var clock = std.Io.Clock.now(.real, io);
+    const start = clock.toMilliseconds();
     if (try initPool(b, nnw)) return null;
 
     try startSearch();
 
     // Time checking
     while (true) {
-        if (std.time.milliTimestamp() - start >= time) break;
+        clock = std.Io.Clock.now(.real, io);
+        if (clock.toMilliseconds() - start >= time) break;
     }
 
     stopSearch();

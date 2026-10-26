@@ -8,16 +8,16 @@ const zbr = @import("zobrist.zig");
 const po = @import("pool.zig");
 const tt = @import("tt.zig");
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !void {
     tab.initLines();
     tab.initDiags();
-    try zbr.init();
-    try tt.init(128, std.heap.c_allocator);
+    try zbr.init(init.io);
+    try tt.init(512, std.heap.c_allocator);
     defer tt.deinit(std.heap.c_allocator);
 
-    var nnw = try nn.NN.init("networks/", "v2_2.bin");
+    var nnw = try nn.NN.init("networks/", "v2_2.bin", init.io);
     var b = try bo.Board.fromFen(pos.start);
 
-    try pl.play(&b, &nnw, .Black, 1000, false);
+    try pl.play(&b, &nnw, .Black, 1000, false, init.io);
     // try pl.selfPlay(&b, &nnw, 600, true);
 }

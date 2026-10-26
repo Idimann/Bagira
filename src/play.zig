@@ -118,10 +118,16 @@ pub fn legals_print(b: *bo.Board, dep: usize, alloc: std.mem.Allocator) !void {
     std.debug.print("Total: {}\n", .{total});
 }
 
-pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool) !void {
+pub fn play(b: *bo.Board,
+    nnw: *nn.NN,
+    player: bo.Side,
+    time: i64,
+    minimal: bool,
+    io: std.Io,
+) !void {
     if (b.side == player) {
         var buf: [3]u8 = undefined;
-        var reader = std.fs.File.stdin().reader(&buf);
+        var reader = std.Io.File.stdin().reader(io, &buf);
         var stdin = &reader.interface;
         _ = try stdin.takeByte();
 
@@ -156,7 +162,7 @@ pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool
             break;
         }
     } else {
-        if (try po.bestMove(b, nnw, time)) |best| {
+        if (try po.bestMove(b, nnw, time, io)) |best| {
             _ = b.apply(best.move);
             if (!minimal) {
                 b.print();
@@ -187,11 +193,11 @@ pub fn play(b: *bo.Board, nnw: *nn.NN, player: bo.Side, time: i64, minimal: bool
         }
     }
 
-    try play(b, nnw, player, time, minimal);
+    try play(b, nnw, player, time, minimal, io);
 }
 
-pub fn selfPlay(b: *bo.Board, nnw: *nn.NN, time: i64, minimal: bool) !void {
-    if (try po.bestMove(b, nnw, time)) |best| {
+pub fn selfPlay(b: *bo.Board, nnw: *nn.NN, time: i64, minimal: bool, io: std.Io) !void {
+    if (try po.bestMove(b, nnw, time, io)) |best| {
         _ = b.apply(best.move);
         if (!minimal) {
             b.print();
